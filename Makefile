@@ -1,4 +1,4 @@
-TARGET_DIR=~/Library/Preferences/Renoise/V3.5.4/Scripts/Tools/com.duftetools.SimplePianoroll.xrnx/
+TARGET_DIR=~/Library/Preferences/Renoise/V3.5.4/Scripts/Tools/com.zyurkalov.SimplePianoroll.xrnx/
 
 # Standard target to copy files
 install:
@@ -11,7 +11,7 @@ package:
 	@echo "\033[1m==> Creating .xrnx package\033[0m"
 	@version="$$(sed -n 's|.*<Version>\(.*\)</Version>.*|\1|p' manifest.xml)"; \
 	api_version="$$(sed -n 's|.*<ApiVersion>\(.*\)</ApiVersion>.*|\1|p' manifest.xml)"; \
-	package_name="com.duftetools.SimplePianoroll_v$${version}_api$${api_version}.xrnx"; \
+	package_name="com.zyurkalov.SimplePianoroll_v$${version}_api$${api_version}.xrnx"; \
 	backup_file="$$(mktemp manifest.xml.XXXXXX)"; \
 	cp manifest.xml "$$backup_file"; \
 	trap 'mv "$$backup_file" manifest.xml' EXIT; \

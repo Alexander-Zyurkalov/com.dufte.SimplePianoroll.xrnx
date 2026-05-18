@@ -2,6 +2,8 @@
 local app = renoise.app()
 local tool = renoise.tool()
 local song
+local currentScale
+local currentScaleOffset
 
 --predefine local functions, forward declaration
 local showPreferences
@@ -151,6 +153,46 @@ local notesTable = {
     "A#",
     "B",
 }
+
+-- zargam notes
+local zargamNotes = {
+    "su", "nu", "vu", "du", "tu", "pu", "bu", "mu", "gu", "ku", "ru", "lu", -- 3th octave
+    "za", "le", "re", "ka", "ga", "ma", "ba", "pa", "ta", "da", "vi", "ni", -- 4th octave
+    "sa", "ly", "ry", "ky", "gy", "my", "by", "py", "ty", "dy", "vy", "ny", -- 5th octave
+    "sy",
+}
+
+-- helper function to get zargam label for a note
+local getZargamLabel = function(note_value)
+    local tonic = 48 -- Default C-4
+    if currentScaleOffset then
+        tonic = 48 + (currentScaleOffset - 1)
+    end
+
+    local rel = note_value - tonic
+    if rel >= -12 and rel <= 24 then
+        return zargamNotes[rel + 13]
+    end
+
+    local rel_oct = math.floor(rel / 12) + 4
+    if rel < -12 then
+        -- Mirrored mapping for lower octaves
+        local mirrored_consonants = {
+            [0] = "s", [1] = "n", [2] = "v", [3] = "d", [4] = "t", [5] = "p",
+            [6] = "b", [7] = "m", [8] = "g", [9] = "k", [10] = "r", [11] = "l"
+        }
+        local note_in_mirrored_oct = rel % 12
+        return mirrored_consonants[note_in_mirrored_oct] .. tostring(rel_oct) .. "u"
+    else
+        -- Regular mapping for higher octaves
+        local regular_consonants = {
+            [0] = "s", [1] = "l", [2] = "r", [3] = "k", [4] = "g", [5] = "m",
+            [6] = "b", [7] = "p", [8] = "t", [9] = "d", [10] = "v", [11] = "n"
+        }
+        local note_in_regular_oct = rel % 12
+        return regular_consonants[note_in_regular_oct] .. tostring(rel_oct) .. "y"
+    end
+end
 
 local scaleTypes = {
     "None",
@@ -574,8 +616,6 @@ local currentNoteEndDelay = 0
 local currentNoteVelocityPreview = 127
 local currentNoteEndVelocity = 255
 local currentGhostTrack
-local currentScale
-local currentScaleOffset
 local lastTrackIndex
 
 local noteSelection = {}
@@ -600,27 +640,27 @@ local lastKeyPress
 
 --mouse handling vars
 local xypadpos = {
-    x = 0,      --click pos x
-    y = 0,      --click pos y
+    x = 0, --click pos x
+    y = 0, --click pos y
     lval_x = 0, --last val_x
     lval_y = 0, --last val_y
-    nx = 0,     --note x pos
-    ny = 0,     --note y pos
-    nc = 0,     --note column
-    nlen = 0,   --note len
+    nx = 0, --note x pos
+    ny = 0, --note y pos
+    nc = 0, --note column
+    nlen = 0, --note len
     nvel = 0,
-    time = 0,   --click time
+    time = 0, --click time
     lastx = 0,
     lastval = nil,
     wasnewnote = false,
-    notemode = false,      --when note mode is active
-    previewmode = false,   --is scale mode active?
-    scalemode = false,     --is scale mode active?
-    removemode = false,    --is remove mode active
-    scaling = false,       --are we scaling currently?
-    duplicate = false,     --for duplicate shortcut state var
+    notemode = false, --when note mode is active
+    previewmode = false, --is scale mode active?
+    scalemode = false, --is scale mode active?
+    removemode = false, --is remove mode active
+    scaling = false, --are we scaling currently?
+    duplicate = false, --for duplicate shortcut state var
     distanceblock = false, --some distance needed before process anything
-    mousepreview = false,  --state if note preview for new or changed notes via mouse is active
+    mousepreview = false, --state if note preview for new or changed notes via mouse is active
     lastmousepreviewtime = 0,
     resetscale = false,
     pickuptiming = 0.025, --time before trackpad reacts
@@ -738,7 +778,8 @@ end
 
 --force value between and inclusive min/max values, return lowerBound when value is nan
 clamp = function(value, lowerBound, upperBound)
-    if value ~= value then -- NaN check
+    if value ~= value then
+        -- NaN check
         value = lowerBound
     end
     if lowerBound > upperBound then
@@ -822,7 +863,7 @@ end
 restoreFocus = function()
     --dont set focus on note control refresh
     if windowObj and windowObj.visible
-        and (not dialogVars.histogramObj or not dialogVars.histogramObj.visible)
+            and (not dialogVars.histogramObj or not dialogVars.histogramObj.visible)
     then
         windowObj:show()
     end
@@ -997,7 +1038,7 @@ colorNoteVelocity = function(vel, isOnStep, isInSelection, ins)
     if vel < 0x7f and preferences.applyVelocityColorShading.value then
         if preferences.shadingType.value == 2 then
             color = alphablendColors(noteColor, colorBaseGridColor,
-                preferences.velocityColorShadingAmount.value / 0x7f * (0x7f - vel))
+                    preferences.velocityColorShadingAmount.value / 0x7f * (0x7f - vel))
         else
             color = shadeColor(noteColor, preferences.velocityColorShadingAmount.value / 0x7f * (0x7f - vel))
         end
@@ -1029,7 +1070,7 @@ end
 convertStringToColorValue = function(val, default)
     local ret
     local red, green, blue = string.match(val,
-        '^#*([0-9a-fA-F][0-9a-fA-F])([0-9a-fA-F][0-9a-fA-F])([0-9a-fA-F][0-9a-fA-F])$')
+            '^#*([0-9a-fA-F][0-9a-fA-F])([0-9a-fA-F][0-9a-fA-F])([0-9a-fA-F][0-9a-fA-F])$')
     if red and green and blue then
         ret = {
             fromRenoiseHex(red),
@@ -1141,15 +1182,15 @@ end
 initColors = function()
     --load colors from preferences
     colorBaseGridColor = convertStringToColorValue(preferences.colorBaseGridColor.value,
-        defaultPreferences.colorBaseGridColor)
+            defaultPreferences.colorBaseGridColor)
     colorNote = convertStringToColorValue(preferences.colorNote.value, defaultPreferences.colorNote)
     colorNoteHighlight = convertStringToColorValue(preferences.colorNoteHighlight.value,
-        defaultPreferences.colorNoteHighlight)
+            defaultPreferences.colorNoteHighlight)
     colorNoteHighlight2 = convertStringToColorValue(preferences.colorNoteHighlight2.value,
-        defaultPreferences.colorNoteHighlight2)
+            defaultPreferences.colorNoteHighlight2)
     colorNoteMuted = convertStringToColorValue(preferences.colorNoteMuted.value, defaultPreferences.colorNoteMuted)
     colorNoteSelected = convertStringToColorValue(preferences.colorNoteSelected.value,
-        defaultPreferences.colorNoteSelected)
+            defaultPreferences.colorNoteSelected)
     colorStepOn = convertStringToColorValue(preferences.colorStepOn.value, defaultPreferences.colorStepOn)
     colorStepOff = convertStringToColorValue(preferences.colorStepOff.value, defaultPreferences.colorStepOff)
     colorList = convertStringToColorValue(preferences.colorList.value, defaultPreferences.colorList)
@@ -1159,7 +1200,7 @@ initColors = function()
     colorPan = convertStringToColorValue(preferences.colorPan.value, defaultPreferences.colorPan)
     colorDelay = convertStringToColorValue(preferences.colorDelay.value, defaultPreferences.colorDelay)
     colorLoopSelection = convertStringToColorValue(preferences.colorLoopSelection.value,
-        defaultPreferences.colorLoopSelection)
+            defaultPreferences.colorLoopSelection)
     --prepare shading colors
     colorWhiteKey = {
         colorBaseGridColor,
@@ -1168,24 +1209,24 @@ initColors = function()
         shadeColor(colorBaseGridColor, preferences.oddBeatShadingAmount.value),
         shadeColor(colorBaseGridColor, preferences.oddBarsShadingAmount.value),
         shadeColor(shadeColor(colorBaseGridColor, preferences.oddBarsShadingAmount.value),
-            preferences.oddBeatShadingAmount.value),
+                preferences.oddBeatShadingAmount.value),
         shadeColor(colorBaseGridColor, preferences.oddBarsShadingAmount.value),
         shadeColor(shadeColor(colorBaseGridColor, preferences.oddBarsShadingAmount.value),
-            preferences.oddBeatShadingAmount.value),
+                preferences.oddBeatShadingAmount.value),
     }
     colorBlackKey = {
         shadeColor(colorWhiteKey[1], preferences.outOfNoteScaleShadingAmount.value),
         shadeColor(shadeColor(colorWhiteKey[1], preferences.outOfNoteScaleShadingAmount.value),
-            preferences.oddBeatShadingAmount.value),
+                preferences.oddBeatShadingAmount.value),
         shadeColor(colorWhiteKey[1], preferences.outOfNoteScaleShadingAmount.value),
         shadeColor(shadeColor(colorWhiteKey[1], preferences.outOfNoteScaleShadingAmount.value),
-            preferences.oddBeatShadingAmount.value),
+                preferences.oddBeatShadingAmount.value),
         shadeColor(colorWhiteKey[5], preferences.outOfNoteScaleShadingAmount.value),
         shadeColor(shadeColor(colorWhiteKey[5], preferences.outOfNoteScaleShadingAmount.value),
-            preferences.oddBeatShadingAmount.value),
+                preferences.oddBeatShadingAmount.value),
         shadeColor(colorWhiteKey[5], preferences.outOfNoteScaleShadingAmount.value),
         shadeColor(shadeColor(colorWhiteKey[5], preferences.outOfNoteScaleShadingAmount.value),
-            preferences.oddBeatShadingAmount.value),
+                preferences.oddBeatShadingAmount.value),
     }
 end
 
@@ -1198,7 +1239,7 @@ checkMode = function(mode)
     end
     if mode == "pen" then
         if (penMode and not modifier.keyControl) or
-            (not modifier.keyControl and not modifier.keyShift and modifier.keyAlt and not penMode)
+                (not modifier.keyControl and not modifier.keyShift and modifier.keyAlt and not penMode)
         then
             return true
         end
@@ -1229,7 +1270,7 @@ refreshEditPosIndicator = function()
     local alignedEditPos = computeAlignedGridSkipX((eP - stepOffset) + gridPhase)
 
     if lastEditPos == nil or
-        lastEditPos ~= alignedEditPos
+            lastEditPos ~= alignedEditPos
     then
         lastEditPos = alignedEditPos
         se.width = math.max(gridStepSizeWScaled * skipX, 6)
@@ -1369,9 +1410,9 @@ updateNoteSelection = function(note_data, clear, noNoteReadOut)
                 local isTopMost = true
                 for k2 in pairs(noteData) do
                     if
-                        k ~= k2
-                        and noteData[k2].note > noteData[k].note
-                        and not (noteData[k].line + noteData[k].len - 1 < noteData[k2].line
+                    k ~= k2
+                            and noteData[k2].note > noteData[k].note
+                            and not (noteData[k].line + noteData[k].len - 1 < noteData[k2].line
                             or noteData[k2].line + noteData[k2].len - 1 < noteData[k].line)
                     then
                         isTopMost = false
@@ -1388,9 +1429,9 @@ updateNoteSelection = function(note_data, clear, noNoteReadOut)
                 local isBottomMost = true
                 for k2 in pairs(noteData) do
                     if
-                        k ~= k2
-                        and noteData[k2].note < noteData[k].note
-                        and not (noteData[k].line + noteData[k].len - 1 < noteData[k2].line
+                    k ~= k2
+                            and noteData[k2].note < noteData[k].note
+                            and not (noteData[k].line + noteData[k].len - 1 < noteData[k2].line
                             or noteData[k2].line + noteData[k2].len - 1 < noteData[k].line)
                     then
                         isBottomMost = false
@@ -1405,12 +1446,12 @@ updateNoteSelection = function(note_data, clear, noNoteReadOut)
             for k in pairs(noteData) do
                 --check if note is in renoise selection
                 if
-                    song.selected_track_index >= selection.start_track and
-                    song.selected_track_index <= selection.end_track and
-                    noteData[k].column >= selection.start_column and
-                    noteData[k].column <= selection.end_column and
-                    noteData[k].line >= selection.start_line and
-                    noteData[k].line <= selection.end_line
+                song.selected_track_index >= selection.start_track and
+                        song.selected_track_index <= selection.end_track and
+                        noteData[k].column >= selection.start_column and
+                        noteData[k].column <= selection.end_column and
+                        noteData[k].line >= selection.start_line and
+                        noteData[k].line <= selection.end_line
                 then
                     table.insert(newNotes, noteData[k])
                 end
@@ -1713,12 +1754,12 @@ returnColumnWhenEnoughSpaceForNote = function(line, len, dly, end_dly)
                     if not lV.is_empty then
                         lVnC = lV:note_column(c)
                         if lVnC.note_value < 120
-                            and lVnC.delay_value > 0 then
+                                and lVnC.delay_value > 0 then
                             validSpace = false
                         end
                         --check if there is enough space for note off with delay
                         if end_dly and end_dly > 0
-                            and lVnC.note_value < 121 then
+                                and lVnC.note_value < 121 then
                             validSpace = false
                         end
                     end
@@ -1837,25 +1878,25 @@ removeSelectedNotes = function(cut)
     for i = 1, #notesOnLine do
         note_data = noteData[notesOnLine[i]]
         column = returnColumnWhenEnoughSpaceForNote(
-            note_data.line,
-            note_data.len,
-            note_data.dly,
-            note_data.end_dly
+                note_data.line,
+                note_data.len,
+                note_data.dly,
+                note_data.end_dly
         )
         if column then
             note_data.column = column
         end
         note_data.noteoff = addNoteToPattern(
-            note_data.column,
-            note_data.line,
-            note_data.len,
-            note_data.note,
-            note_data.vel,
-            note_data.end_vel,
-            note_data.pan,
-            note_data.dly,
-            note_data.end_dly,
-            note_data.ins
+                note_data.column,
+                note_data.line,
+                note_data.len,
+                note_data.note,
+                note_data.vel,
+                note_data.end_vel,
+                note_data.pan,
+                note_data.dly,
+                note_data.end_dly,
+                note_data.ins
         )
         noteData[notesOnLine[i]] = note_data
     end
@@ -2098,7 +2139,7 @@ triggerNoteOfCurrentInstrument = function(note_value, pressed, velocity, newOrCh
             if not triggered[key] then
                 triggered[key] = true
                 triggerNoteOfCurrentInstrument(note.note, pressed, note.vel, true,
-                    note.ins, "mousepreview")
+                        note.ins, "mousepreview")
             end
         end
         xypadpos.mousepreview = pressed
@@ -2179,7 +2220,7 @@ triggerNoteOfCurrentInstrument = function(note_value, pressed, velocity, newOrCh
             for i = 1, #lastTriggerNote do
                 if i <= math.max(1, #lastTriggerNote - preferences.previewPolyphony.value) then
                     song:trigger_instrument_note_off(lastTriggerNote[i].instrument_index,
-                        lastTriggerNote[i].track_index, lastTriggerNote[i].note)
+                            lastTriggerNote[i].track_index, lastTriggerNote[i].note)
                 else
                     table.insert(newLastTriggerNote, lastTriggerNote[i])
                 end
@@ -2194,7 +2235,7 @@ triggerNoteOfCurrentInstrument = function(note_value, pressed, velocity, newOrCh
             volume = velocity / 127.0
         }
         song:trigger_instrument_note_on(noteEvent.instrument_index, noteEvent.track_index, noteEvent.note,
-            noteEvent.volume)
+                noteEvent.volume)
         table.insert(lastTriggerNote, noteEvent)
     end
 end
@@ -2202,9 +2243,9 @@ end
 --stop if note is playing, only when song is playing and instrument is a plugin
 stopInstrumentNoteIfPlaying = function(note_data)
     if song.transport.playing and
-        song.transport.edit_pos.sequence == song.transport.playback_pos.sequence and
-        note_data.line <= song.transport.playback_pos.line and
-        note_data.line + note_data.len > song.transport.playback_pos.line
+            song.transport.edit_pos.sequence == song.transport.playback_pos.sequence and
+            note_data.line <= song.transport.playback_pos.line and
+            note_data.line + note_data.len > song.transport.playback_pos.line
     then
         local instrument = note_data.ins
         if instrument == 255 then
@@ -2218,10 +2259,10 @@ stopInstrumentNoteIfPlaying = function(note_data)
         if plugin and plugin.plugin_device then
             --send note on with velocity 0 for a note_off event
             song:trigger_instrument_note_on(
-                instrument + 1,
-                song.selected_track_index,
-                note_data.note,
-                0)
+                    instrument + 1,
+                    song.selected_track_index,
+                    note_data.note,
+                    0)
         end
     end
 end
@@ -2230,7 +2271,7 @@ end
 playPatternFromLine = function(line)
     if line == nil then
         if song.transport.edit_pos.sequence == song.transport.loop_start.sequence
-            and song.transport.loop_start.line < song.selected_pattern.number_of_lines + 1 then
+                and song.transport.loop_start.line < song.selected_pattern.number_of_lines + 1 then
             line = song.transport.loop_start.line
         else
             line = 1
@@ -2241,7 +2282,7 @@ playPatternFromLine = function(line)
         if #lastTriggerNote > 0 then
             for i = 1, #lastTriggerNote do
                 song:trigger_instrument_note_off(lastTriggerNote[i].instrument_index, lastTriggerNote[i].track_index,
-                    lastTriggerNote[i].note)
+                        lastTriggerNote[i].note)
             end
             table.clear(lastTriggerNote)
         end
@@ -2280,10 +2321,10 @@ moveSelectedNotes = function(steps)
         removeNoteInPattern(noteSelection[key].column, noteSelection[key].line, noteSelection[key].len)
         --search for valid column
         column = returnColumnWhenEnoughSpaceForNote(
-            noteSelection[key].line + steps,
-            noteSelection[key].len,
-            noteSelection[key].dly,
-            noteSelection[key].end_dly
+                noteSelection[key].line + steps,
+                noteSelection[key].len,
+                noteSelection[key].dly,
+                noteSelection[key].end_dly
         )
         if column then
             noteSelection[key].step = noteSelection[key].step + steps
@@ -2291,16 +2332,16 @@ moveSelectedNotes = function(steps)
             noteSelection[key].column = column
         end
         noteSelection[key].noteoff = addNoteToPattern(
-            noteSelection[key].column,
-            noteSelection[key].line,
-            noteSelection[key].len,
-            noteSelection[key].note,
-            noteSelection[key].vel,
-            noteSelection[key].end_vel,
-            noteSelection[key].pan,
-            noteSelection[key].dly,
-            noteSelection[key].end_dly,
-            noteSelection[key].ins
+                noteSelection[key].column,
+                noteSelection[key].line,
+                noteSelection[key].len,
+                noteSelection[key].note,
+                noteSelection[key].vel,
+                noteSelection[key].end_vel,
+                noteSelection[key].pan,
+                noteSelection[key].dly,
+                noteSelection[key].end_dly,
+                noteSelection[key].ins
         )
         if not column then
             state = false
@@ -2329,14 +2370,18 @@ moveSelectedNotesByMicroSteps = function(microsteps, snapSpecialGrid)
         for i = 1, #noteSelection do
             local s = getMicroStepValue(noteSelection[i].line, noteSelection[i].dly)
             local L = getMicroStepValue(
-                noteSelection[i].line,
-                noteSelection[i].dly,
-                noteSelection[i].len,
-                noteSelection[i].end_dly
+                    noteSelection[i].line,
+                    noteSelection[i].dly,
+                    noteSelection[i].len,
+                    noteSelection[i].end_dly
             )
-            if s < lo then lo = s end
+            if s < lo then
+                lo = s
+            end
             local e = s + (L or 0)
-            if e > hi then hi = e end
+            if e > hi then
+                hi = e
+            end
         end
     else
         --resort note selection table, so when one note in selection cant be moved, the whole move will be ignored
@@ -2360,8 +2405,8 @@ moveSelectedNotesByMicroSteps = function(microsteps, snapSpecialGrid)
             microsteps = -math.min(math.abs(microsteps), noteSelection[1].dly + ((noteSelection[1].line - 1) * 0x100))
         elseif microsteps > 0 then
             microsteps = math.min(microsteps, song.selected_pattern.number_of_lines * 0x100 -
-                ((noteSelection[1].line + noteSelection[1].len - 1) * 0x100 +
-                    noteSelection[1].end_dly))
+                    ((noteSelection[1].line + noteSelection[1].len - 1) * 0x100 +
+                            noteSelection[1].end_dly))
         end
 
         --no movement necessary?
@@ -2400,10 +2445,10 @@ moveSelectedNotesByMicroSteps = function(microsteps, snapSpecialGrid)
         if microsteps == "reverse" then
             local s = getMicroStepValue(noteSelection[key].line, noteSelection[key].dly)
             local L = getMicroStepValue(
-                noteSelection[key].line,
-                noteSelection[key].dly,
-                noteSelection[key].len,
-                noteSelection[key].end_dly
+                    noteSelection[key].line,
+                    noteSelection[key].dly,
+                    noteSelection[key].len,
+                    noteSelection[key].end_dly
             )
             delta = (lo + hi) - (2 * s + L)
         else
@@ -2417,10 +2462,10 @@ moveSelectedNotesByMicroSteps = function(microsteps, snapSpecialGrid)
         len = len - steps
         --search for column
         column = returnColumnWhenEnoughSpaceForNote(
-            noteSelection[key].line + steps,
-            noteSelection[key].len + len,
-            (noteSelection[key].dly + delay) % 0x100,
-            (noteSelection[key].end_dly + delay) % 0x100
+                noteSelection[key].line + steps,
+                noteSelection[key].len + len,
+                (noteSelection[key].dly + delay) % 0x100,
+                (noteSelection[key].end_dly + delay) % 0x100
         )
         if column then
             noteSelection[key].step = noteSelection[key].step + steps
@@ -2431,16 +2476,16 @@ moveSelectedNotesByMicroSteps = function(microsteps, snapSpecialGrid)
             noteSelection[key].column = column
         end
         noteSelection[key].noteoff = addNoteToPattern(
-            noteSelection[key].column,
-            noteSelection[key].line,
-            noteSelection[key].len,
-            noteSelection[key].note,
-            noteSelection[key].vel,
-            noteSelection[key].end_vel,
-            noteSelection[key].pan,
-            noteSelection[key].dly,
-            noteSelection[key].end_dly,
-            noteSelection[key].ins
+                noteSelection[key].column,
+                noteSelection[key].line,
+                noteSelection[key].len,
+                noteSelection[key].note,
+                noteSelection[key].vel,
+                noteSelection[key].end_vel,
+                noteSelection[key].pan,
+                noteSelection[key].dly,
+                noteSelection[key].end_dly,
+                noteSelection[key].ins
         )
         if not column then
             return false
@@ -2459,8 +2504,12 @@ transposeSelectedNotes = function(transpose, keepscale, nopreview)
     if transpose == "flip" then
         for i = 1, #noteSelection do
             local n = noteSelection[i].note
-            if n < lo then lo = n end
-            if n > hi then hi = n end
+            if n < lo then
+                lo = n
+            end
+            if n > hi then
+                hi = n
+            end
         end
     elseif type(transpose) == "number" or transpose == "invup" or transpose == "invdown" then
         if transpose == "invdown" or (type(transpose) == "number" and transpose > 0) then
@@ -2526,8 +2575,8 @@ transposeSelectedNotes = function(transpose, keepscale, nopreview)
         if transpose == "invup" or transpose == "invdown" then
             for key2 = 1, #noteSelection do
                 if noteSelection[key2].note == transposeVal
-                    and noteSelection[key].line <= noteSelection[key2].line + noteSelection[key2].len - 1
-                    and noteSelection[key2].line <= noteSelection[key].line + noteSelection[key].len - 1
+                        and noteSelection[key].line <= noteSelection[key2].line + noteSelection[key2].len - 1
+                        and noteSelection[key2].line <= noteSelection[key].line + noteSelection[key].len - 1
                 then
                     --skip tranpose
                     goto continue
@@ -2546,7 +2595,7 @@ transposeSelectedNotes = function(transpose, keepscale, nopreview)
         if transpose == "invup" or transpose == "invdown" then
             break
         end
-        ::continue::
+        :: continue ::
     end
     --trigger notes after transpose
     if nopreview == nil or nopreview == false then
@@ -2602,10 +2651,10 @@ pasteNotesFromClipboard = function(overwriteInstrument)
         end
         --search for valid column
         column = returnColumnWhenEnoughSpaceForNote(
-            clipboard[key].line + lineoffset,
-            clipboard[key].len,
-            clipboard[key].dly,
-            clipboard[key].end_dly
+                clipboard[key].line + lineoffset,
+                clipboard[key].len,
+                clipboard[key].dly,
+                clipboard[key].end_dly
         )
         if column then
             clipboard[key].column = column
@@ -2617,16 +2666,16 @@ pasteNotesFromClipboard = function(overwriteInstrument)
             return false
         end
         clipboard[key].noteoff = addNoteToPattern(
-            clipboard[key].column,
-            clipboard[key].line,
-            clipboard[key].len,
-            clipboard[key].note,
-            clipboard[key].vel,
-            clipboard[key].end_vel,
-            clipboard[key].pan,
-            clipboard[key].dly,
-            clipboard[key].end_dly,
-            instrument
+                clipboard[key].column,
+                clipboard[key].line,
+                clipboard[key].len,
+                clipboard[key].note,
+                clipboard[key].vel,
+                clipboard[key].end_vel,
+                clipboard[key].pan,
+                clipboard[key].dly,
+                clipboard[key].end_dly,
+                instrument
         )
         --add pasted note to selection
         table.insert(noteSelection, clipboard[key])
@@ -2674,16 +2723,16 @@ scaleNoteSelection = function(times)
             noteSelection[key].len = len
         end
         noteSelection[key].noteoff = addNoteToPattern(
-            noteSelection[key].column,
-            noteSelection[key].line,
-            noteSelection[key].len,
-            noteSelection[key].note,
-            noteSelection[key].vel,
-            noteSelection[key].end_vel,
-            noteSelection[key].pan,
-            noteSelection[key].dly,
-            noteSelection[key].end_dly,
-            noteSelection[key].ins
+                noteSelection[key].column,
+                noteSelection[key].line,
+                noteSelection[key].len,
+                noteSelection[key].note,
+                noteSelection[key].vel,
+                noteSelection[key].end_vel,
+                noteSelection[key].pan,
+                noteSelection[key].dly,
+                noteSelection[key].end_dly,
+                noteSelection[key].ins
         )
         if not column then
             showStatus("Not enough space to scale selection.")
@@ -2701,9 +2750,9 @@ glueSelectedNotes = function()
         -- notes must be immediately adjacent in lines and have no transition delays
         -- and must share same pitch, instrument and pan to avoid ambiguous merges
         return (a.line + a.len) == b.line
-            and (a.note == b.note)
-            and (a.ins == b.ins)
-            and (a.pan == b.pan)
+                and (a.note == b.note)
+                and (a.ins == b.ins)
+                and (a.pan == b.pan)
     end
 
     if not noteSelection or #noteSelection == 0 then
@@ -2748,22 +2797,22 @@ glueSelectedNotes = function()
                 -- We found a chain i..last_idx worth gluing
                 for r = last_idx, i, -1 do
                     removeNoteInPattern(
-                        noteSelection[r].column,
-                        noteSelection[r].line,
-                        noteSelection[r].len
+                            noteSelection[r].column,
+                            noteSelection[r].line,
+                            noteSelection[r].len
                     )
                 end
 
                 -- build final note data:
-                local first         = base
-                local last          = noteSelection[last_idx]
+                local first = base
+                local last = noteSelection[last_idx]
 
                 -- find a valid column for the glued note (prefer free space)
                 local target_column = returnColumnWhenEnoughSpaceForNote(
-                    first.line,
-                    glued_len,
-                    first.dly,
-                    last.end_dly
+                        first.line,
+                        glued_len,
+                        first.dly,
+                        last.end_dly
                 )
                 if not target_column then
                     showStatus("Not enough space to glue notes here.")
@@ -2772,31 +2821,31 @@ glueSelectedNotes = function()
 
                 local glued = {
                     -- carry over identity & start params from first note
-                    line    = first.line,
-                    note    = first.note,
-                    vel     = first.vel,
-                    dly     = first.dly,
-                    pan     = first.pan,
-                    ins     = first.ins,
-                    column  = target_column,
+                    line = first.line,
+                    note = first.note,
+                    vel = first.vel,
+                    dly = first.dly,
+                    pan = first.pan,
+                    ins = first.ins,
+                    column = target_column,
                     end_vel = first.end_vel,
                     -- carry over end params from last note
                     end_dly = last.end_dly,
-                    len     = glued_len,
+                    len = glued_len,
                 }
 
                 -- add glued note
                 glued.noteoff = addNoteToPattern(
-                    glued.column,
-                    glued.line,
-                    glued.len,
-                    glued.note,
-                    glued.vel,
-                    glued.end_vel,
-                    glued.pan,
-                    glued.dly,
-                    glued.end_dly,
-                    glued.ins
+                        glued.column,
+                        glued.line,
+                        glued.len,
+                        glued.note,
+                        glued.vel,
+                        glued.end_vel,
+                        glued.pan,
+                        glued.dly,
+                        glued.end_dly,
+                        glued.ins
                 )
 
                 table.insert(newSelection, glued)
@@ -2841,7 +2890,7 @@ chopSelectedNotes = function()
             }) do
                 --search for valid column
                 local column = returnColumnWhenEnoughSpaceForNote(v.line, v.len, noteSelection[key].dly,
-                    noteSelection[key].end_dly)
+                        noteSelection[key].end_dly)
                 if not column then
                     showStatus("Not enough space to chop notes here.")
                     return false
@@ -2860,16 +2909,16 @@ chopSelectedNotes = function()
                     ins = noteSelection[key].ins
                 }
                 note_data.noteoff = addNoteToPattern(
-                    note_data.column,
-                    note_data.line,
-                    note_data.len,
-                    note_data.note,
-                    note_data.vel,
-                    note_data.end_vel,
-                    note_data.pan,
-                    note_data.dly,
-                    note_data.end_dly,
-                    note_data.ins
+                        note_data.column,
+                        note_data.line,
+                        note_data.len,
+                        note_data.note,
+                        note_data.vel,
+                        note_data.end_vel,
+                        note_data.pan,
+                        note_data.dly,
+                        note_data.end_dly,
+                        note_data.ins
                 )
                 table.insert(newSelection, note_data)
             end
@@ -2912,10 +2961,10 @@ duplicateSelectedNotes = function(noOffset)
     for key = 1, #noteSelection do
         --search for valid column
         column = returnColumnWhenEnoughSpaceForNote(
-            noteSelection[key].line + offset,
-            noteSelection[key].len,
-            noteSelection[key].dly,
-            noteSelection[key].end_dly
+                noteSelection[key].line + offset,
+                noteSelection[key].len,
+                noteSelection[key].dly,
+                noteSelection[key].end_dly
         )
         if column then
             noteSelection[key].column = column
@@ -2926,16 +2975,16 @@ duplicateSelectedNotes = function(noOffset)
             return false
         end
         noteSelection[key].noteoff = addNoteToPattern(
-            noteSelection[key].column,
-            noteSelection[key].line,
-            noteSelection[key].len,
-            noteSelection[key].note,
-            noteSelection[key].vel,
-            noteSelection[key].end_vel,
-            noteSelection[key].pan,
-            noteSelection[key].dly,
-            noteSelection[key].end_dly,
-            noteSelection[key].ins
+                noteSelection[key].column,
+                noteSelection[key].line,
+                noteSelection[key].len,
+                noteSelection[key].note,
+                noteSelection[key].vel,
+                noteSelection[key].end_vel,
+                noteSelection[key].pan,
+                noteSelection[key].dly,
+                noteSelection[key].end_dly,
+                noteSelection[key].ins
         )
     end
     refreshStates.refreshPianoRollNeeded = true
@@ -2990,7 +3039,7 @@ changeSizeSelectedNotesByMicroSteps = function(microsteps)
             delay = (noteSelection[key].end_dly + microsteps) % 0x100
             len = math.floor((noteSelection[key].end_dly + microsteps) / 0x100)
         end
-        ::process::
+        :: process ::
         --remove note
         removeNoteInPattern(noteSelection[key].column, noteSelection[key].line, noteSelection[key].len)
         --prepare len difference for new delay values
@@ -3000,10 +3049,10 @@ changeSizeSelectedNotesByMicroSteps = function(microsteps)
         end
         --search for column
         column = returnColumnWhenEnoughSpaceForNote(
-            noteSelection[key].line,
-            noteSelection[key].len + len,
-            noteSelection[key].dly,
-            delay
+                noteSelection[key].line,
+                noteSelection[key].len + len,
+                noteSelection[key].dly,
+                delay
         )
         if column then
             if noteSelection[key].len == 1 and noteSelection[key].len + len > 1 then
@@ -3024,22 +3073,22 @@ changeSizeSelectedNotesByMicroSteps = function(microsteps)
             noteSelection[key].column = column
         end
         noteSelection[key].noteoff = addNoteToPattern(
-            noteSelection[key].column,
-            noteSelection[key].line,
-            noteSelection[key].len,
-            noteSelection[key].note,
-            noteSelection[key].vel,
-            noteSelection[key].end_vel,
-            noteSelection[key].pan,
-            noteSelection[key].dly,
-            noteSelection[key].end_dly,
-            noteSelection[key].ins
+                noteSelection[key].column,
+                noteSelection[key].line,
+                noteSelection[key].len,
+                noteSelection[key].note,
+                noteSelection[key].vel,
+                noteSelection[key].end_vel,
+                noteSelection[key].pan,
+                noteSelection[key].dly,
+                noteSelection[key].end_dly,
+                noteSelection[key].ins
         )
         if not column then
             state = false
             break
         end
-        ::continue::
+        :: continue ::
     end
     if #noteSelection == 1 and preferences.setVelPanDlyLenFromLastNote.value then
         currentNoteLength = noteSelection[1].len
@@ -3072,7 +3121,7 @@ changeSizeSelectedNotes = function(len, add)
         end
         --search for valid column
         column = returnColumnWhenEnoughSpaceForNote(noteSelection[key].line, newLen, noteSelection[key].dly,
-            noteSelection[key].end_dly)
+                noteSelection[key].end_dly)
         if column then
             if noteSelection[key].len == 1 and newLen > 1 then
                 if toRenoiseHex(noteSelection[key].vel):sub(1, 1) == "C" then
@@ -3090,16 +3139,16 @@ changeSizeSelectedNotes = function(len, add)
             ret = false
         end
         noteSelection[key].noteoff = addNoteToPattern(
-            noteSelection[key].column,
-            noteSelection[key].line,
-            noteSelection[key].len,
-            noteSelection[key].note,
-            noteSelection[key].vel,
-            noteSelection[key].end_vel,
-            noteSelection[key].pan,
-            noteSelection[key].dly,
-            noteSelection[key].end_dly,
-            noteSelection[key].ins
+                noteSelection[key].column,
+                noteSelection[key].line,
+                noteSelection[key].len,
+                noteSelection[key].note,
+                noteSelection[key].vel,
+                noteSelection[key].end_vel,
+                noteSelection[key].pan,
+                noteSelection[key].dly,
+                noteSelection[key].end_dly,
+                noteSelection[key].ins
         )
     end
     --set current scale length as new current length
@@ -3248,22 +3297,22 @@ changePropertiesOfSelectedNotes = function(vel, end_vel, dly, end_dly, pan, ins,
                         removeNoteInPattern(selection.column, selection.line, selection.len)
                         --search for valid column
                         local column = returnColumnWhenEnoughSpaceForNote(selection.line, selection.len, dly,
-                            selection.end_dly)
+                                selection.end_dly)
                         if column then
                             selection.line = selection.line
                             selection.column = column
                         end
                         selection.noteoff = addNoteToPattern(
-                            selection.column,
-                            selection.line,
-                            selection.len,
-                            selection.note,
-                            selection.vel,
-                            selection.end_vel,
-                            selection.pan,
-                            selection.dly,
-                            selection.end_dly,
-                            selection.ins
+                                selection.column,
+                                selection.line,
+                                selection.len,
+                                selection.note,
+                                selection.vel,
+                                selection.end_vel,
+                                selection.pan,
+                                selection.dly,
+                                selection.end_dly,
+                                selection.ins
                         )
                         --refresh note var
                         note = lineValues[selection.line]:note_column(selection.column)
@@ -3279,22 +3328,22 @@ changePropertiesOfSelectedNotes = function(vel, end_vel, dly, end_dly, pan, ins,
                 removeNoteInPattern(selection.column, selection.line, selection.len)
                 --search for valid column
                 local column = returnColumnWhenEnoughSpaceForNote(selection.line, selection.len, selection.end_dly,
-                    end_dly)
+                        end_dly)
                 if column then
                     selection.line = selection.line
                     selection.column = column
                 end
                 selection.noteoff = addNoteToPattern(
-                    selection.column,
-                    selection.line,
-                    selection.len,
-                    selection.note,
-                    selection.vel,
-                    selection.end_vel,
-                    selection.pan,
-                    selection.dly,
-                    selection.end_dly,
-                    selection.ins
+                        selection.column,
+                        selection.line,
+                        selection.len,
+                        selection.note,
+                        selection.vel,
+                        selection.end_vel,
+                        selection.pan,
+                        selection.dly,
+                        selection.end_dly,
+                        selection.ins
                 )
                 --refresh note var
                 note = lineValues[selection.line]:note_column(selection.column)
@@ -3453,7 +3502,7 @@ quickArp = function(mode, len)
                 table.insert(finalArp, heldNotes[(idx % #heldNotes) + 1].note)
             elseif arpMode == 2 then
                 table.insert(finalArp,
-                    heldNotes[((#heldNotes - idx - 1) % #heldNotes) + 1].note)
+                        heldNotes[((#heldNotes - idx - 1) % #heldNotes) + 1].note)
             elseif arpMode == 6 then
                 table.insert(finalArp, heldNotes[math.random(#heldNotes)].note)
             end
@@ -3485,10 +3534,10 @@ quickArp = function(mode, len)
         else
             --search for valid column
             local column = returnColumnWhenEnoughSpaceForNote(
-                from,
-                noteLen,
-                0,
-                0
+                    from,
+                    noteLen,
+                    0,
+                    0
             )
             if not column then
                 showStatus("Not enough space for arp.")
@@ -3508,16 +3557,16 @@ quickArp = function(mode, len)
                 ins = lastIns
             }
             note_data.noteoff = addNoteToPattern(
-                note_data.column,
-                note_data.line,
-                note_data.len,
-                note_data.note,
-                note_data.vel,
-                note_data.end_vel,
-                note_data.pan,
-                note_data.dly,
-                note_data.end_dly,
-                note_data.ins
+                    note_data.column,
+                    note_data.line,
+                    note_data.len,
+                    note_data.note,
+                    note_data.vel,
+                    note_data.end_vel,
+                    note_data.pan,
+                    note_data.dly,
+                    note_data.end_dly,
+                    note_data.ins
             )
             --add to selection
             table.insert(noteSelection, note_data)
@@ -3542,7 +3591,7 @@ stepSequencing = function(pos, steps)
             for key in pairs(noteData) do
                 notedata = noteData[key]
                 if note == notedata.note and
-                    ((notedata.line <= pos and notedata.line + notedata.len >= pos))
+                        ((notedata.line <= pos and notedata.line + notedata.len >= pos))
                 then
                     notesPlayingLine[note] = notedata.line
                     break
@@ -3567,16 +3616,16 @@ stepSequencing = function(pos, steps)
             if column then
                 notedata.column = column
                 notedata.noteoff = addNoteToPattern(
-                    notedata.column,
-                    notedata.line,
-                    notedata.len,
-                    notedata.note,
-                    notedata.vel,
-                    notedata.end_vel,
-                    notedata.pan,
-                    notedata.dly,
-                    notedata.end_dly,
-                    notedata.ins
+                        notedata.column,
+                        notedata.line,
+                        notedata.len,
+                        notedata.note,
+                        notedata.vel,
+                        notedata.end_vel,
+                        notedata.pan,
+                        notedata.dly,
+                        notedata.end_dly,
+                        notedata.ins
                 )
                 notesPlayingLine[note] = notedata.line
                 refresh = true
@@ -3589,22 +3638,22 @@ stepSequencing = function(pos, steps)
                     removeNoteInPattern(notedata.column, notedata.line, notedata.len)
                     if newLen > 0 then
                         column = returnColumnWhenEnoughSpaceForNote(notedata.line, newLen, notedata.dly, notedata
-                            .end_dly)
+                                .end_dly)
                         if column then
                             notedata.len = newLen
                             notedata.column = column
                         end
                         notedata.noteoff = addNoteToPattern(
-                            notedata.column,
-                            notedata.line,
-                            notedata.len,
-                            notedata.note,
-                            notedata.vel,
-                            notedata.end_vel,
-                            notedata.pan,
-                            notedata.dly,
-                            notedata.end_dly,
-                            notedata.ins
+                                notedata.column,
+                                notedata.line,
+                                notedata.len,
+                                notedata.note,
+                                notedata.vel,
+                                notedata.end_vel,
+                                notedata.pan,
+                                notedata.dly,
+                                notedata.end_dly,
+                                notedata.ins
                         )
                     else
                         notesPlayingLine[note] = nil
@@ -3667,10 +3716,10 @@ moveSelectionThroughNotes = function(dx, dy, addToSelection)
                 x2 = x2 + (noteData[key].len - 1)
             end
             if
-                (dx < 0 and x2 <= x1) or
-                (dx > 0 and x1 <= x2) or
-                (dy < 0 and y2 <= y1) or
-                (dy > 0 and y1 <= y2)
+            (dx < 0 and x2 <= x1) or
+                    (dx > 0 and x1 <= x2) or
+                    (dy < 0 and y2 <= y1) or
+                    (dy > 0 and y1 <= y2)
             then
                 newDistance = calcDistance(x1, y1, x2, y2)
                 if newDistance < distance then
@@ -3702,20 +3751,20 @@ selectRectangle = function(x, y, x2, y2, addToSelection)
     for key in pairs(noteData) do
         note_data = noteData[key]
         if nmin <= note_data.note and
-            nmax >= note_data.note and
-            (
-                (smin >= note_data.step and smin <= note_data.step + note_data.len - 1) or
-                (smax >= note_data.step and smax <= note_data.step + note_data.len - 1) or
-                (note_data.step >= smin and note_data.step + note_data.len - 1 <= smax)
-            )
+                nmax >= note_data.note and
+                (
+                        (smin >= note_data.step and smin <= note_data.step + note_data.len - 1) or
+                                (smax >= note_data.step and smax <= note_data.step + note_data.len - 1) or
+                                (note_data.step >= smin and note_data.step + note_data.len - 1 <= smax)
+                )
         then
             --check if the note is already in the selection table
             dummyNote = nil
             for k2 in pairs(newNoteSelection) do
                 if newNoteSelection[k2].step == note_data.step
-                    and newNoteSelection[k2].len == note_data.len
-                    and newNoteSelection[k2].dly == note_data.dly
-                    and newNoteSelection[k2].note == note_data.note then
+                        and newNoteSelection[k2].len == note_data.len
+                        and newNoteSelection[k2].dly == note_data.dly
+                        and newNoteSelection[k2].note == note_data.note then
                     dummyNote = k2
                     break
                 end
@@ -3930,7 +3979,7 @@ pianoGridClick = function(x, y, released)
                     noteDrawn[note_value] = true
                     --pre check if there is enough space
                     column = returnColumnWhenEnoughSpaceForNote(x, currentNoteLength, currentNoteDelay,
-                        currentNoteEndDelay)
+                            currentNoteEndDelay)
                     --no column found
                     if column == nil then
                         --no space for this note
@@ -3955,23 +4004,23 @@ pianoGridClick = function(x, y, released)
                     end
                     --add new note, so its the first one on line, better for legato porta
                     column = returnColumnWhenEnoughSpaceForNote(x, currentNoteLength, currentNoteDelay,
-                        currentNoteEndDelay)
+                            currentNoteEndDelay)
                     --
                     if not xypadpos.nc then
                         xypadpos.nc = column
                     end
                     --
                     noteoff = addNoteToPattern(
-                        column,
-                        x,
-                        currentNoteLength,
-                        note_value,
-                        currentNoteVelocity,
-                        currentNoteEndVelocity,
-                        currentNotePan,
-                        currentNoteDelay,
-                        currentNoteEndDelay,
-                        currentInstrument
+                            column,
+                            x,
+                            currentNoteLength,
+                            note_value,
+                            currentNoteVelocity,
+                            currentNoteEndVelocity,
+                            currentNotePan,
+                            currentNoteDelay,
+                            currentNoteEndDelay,
+                            currentInstrument
                     )
                     --create note data table
                     new_note_data = {
@@ -4014,31 +4063,31 @@ pianoGridClick = function(x, y, released)
                     for i = 1, #notesOnLine do
                         note_data = noteData[notesOnLine[i]]
                         column = returnColumnWhenEnoughSpaceForNote(
-                            note_data.line,
-                            note_data.len,
-                            note_data.dly,
-                            note_data.end_dly
+                                note_data.line,
+                                note_data.len,
+                                note_data.dly,
+                                note_data.end_dly
                         )
                         if column then
                             note_data.column = column
                         end
                         note_data.noteoff = addNoteToPattern(
-                            note_data.column,
-                            note_data.line,
-                            note_data.len,
-                            note_data.note,
-                            note_data.vel,
-                            note_data.end_vel,
-                            note_data.pan,
-                            note_data.dly,
-                            note_data.end_dly,
-                            note_data.ins
+                                note_data.column,
+                                note_data.line,
+                                note_data.len,
+                                note_data.note,
+                                note_data.vel,
+                                note_data.end_vel,
+                                note_data.pan,
+                                note_data.dly,
+                                note_data.end_dly,
+                                note_data.ins
                         )
                         noteData[notesOnLine[i]] = note_data
                     end
                 else
                     showStatus(
-                        "Some notes are outside the valid range or have already been drawn. These notes were skipped.")
+                            "Some notes are outside the valid range or have already been drawn. These notes were skipped.")
                 end
             end
             --trigger new notes
@@ -4164,7 +4213,7 @@ drawNotesToGrid = function(allNotes)
         if current_note_rowIndex ~= nil then
             local noteOnStepIndex = current_note_step
             local current_note_index = tostring(current_note_step) ..
-                "_" .. tostring(current_note_rowIndex) .. "_" .. tostring(column)
+                    "_" .. tostring(current_note_rowIndex) .. "_" .. tostring(column)
             if current_note_vel == nil then
                 current_note_vel = 255
             end
@@ -4209,7 +4258,7 @@ drawNotesToGrid = function(allNotes)
                 n = current_note_len - 1
                 --when cut value is set, then change note length to 1
                 if (l_song_st.volume_column_visible and current_note_vel >= 192 and current_note_vel <= 207) or
-                    (l_song_st.panning_column_visible and current_note_pan >= 192 and current_note_pan <= 207)
+                        (l_song_st.panning_column_visible and current_note_pan >= 192 and current_note_pan <= 207)
                 then
                     n = 0
                 end
@@ -4245,10 +4294,14 @@ drawNotesToGrid = function(allNotes)
                     current_note_len = 0
                 else
                     -- set xpos(step) and len so it stays in visible grid
-                    if s < 1 then s = 1 end
-                    if e > gW then e = gW end
+                    if s < 1 then
+                        s = 1
+                    end
+                    if e > gW then
+                        e = gW
+                    end
                     current_note_step = s
-                    current_note_len  = e - s + 1
+                    current_note_len = e - s + 1
                 end
                 --display note button, note len is greater 0 and when the row is visible
                 if current_note_len > 0 then
@@ -4305,7 +4358,7 @@ drawNotesToGrid = function(allNotes)
                         cutValue = cutValue - 192
                         if cutValue < l_song_transport.tpl then
                             buttonWidth = buttonWidth -
-                                (gridStepSizeWScaled / 100 * (100 / l_song_transport.tpl * (l_song_transport.tpl - cutValue)))
+                                    (gridStepSizeWScaled / 100 * (100 / l_song_transport.tpl * (l_song_transport.tpl - cutValue)))
                         end
                     end
 
@@ -4396,7 +4449,7 @@ drawNotesToGrid = function(allNotes)
                     end
                 end
             end
-            ::continue::
+            :: continue ::
         end
     end
 end
@@ -4462,8 +4515,8 @@ fillTimeline = function()
             timeslot.text = ""
             if line % lpb == 1 then
                 if beat == 1 or
-                    ((beat == 2 or beat == 4) and showOdd) or
-                    (beat == 3 and showHalf)
+                        ((beat == 2 or beat == 4) and showOdd) or
+                        (beat == 3 and showHalf)
                 then
                     timeslot.text = "│ " .. bar .. "." .. beat
                 end
@@ -4560,12 +4613,12 @@ setScaleHighlighting = function(afterPianoRollRefresh)
     end
     --simple scale highlighting
     if preferences.scaleHighlightingType.value == 1 and
-        (currentScale ~= 1 or currentScaleOffset ~= 1) then
+            (currentScale ~= 1 or currentScaleOffset ~= 1) then
         currentScale = 1
         currentScaleOffset = 1
         ret = true
     elseif (preferences.scaleHighlightingType.value == 2 or preferences.scaleHighlightingType.value == 3) and
-        (currentScale ~= preferences.scaleHighlightingType.value or currentScaleOffset ~= preferences.keyForSelectedScale.value)
+            (currentScale ~= preferences.scaleHighlightingType.value or currentScaleOffset ~= preferences.keyForSelectedScale.value)
     then
         currentScale = preferences.scaleHighlightingType.value
         currentScaleOffset = preferences.keyForSelectedScale.value
@@ -4654,9 +4707,9 @@ setScaleHighlighting = function(afterPianoRollRefresh)
         if currentScale == 1 then
             vbw["currentscale"].text = "None"
         elseif currentScale == 2 then
-            vbw["currentscale"].text = notesTable[currentScaleOffset] .. " Major"
+            vbw["currentscale"].text = getZargamLabel(48 + currentScaleOffset - 1) .. " Major"
         elseif currentScale == 3 then
-            vbw["currentscale"].text = notesTable[currentScaleOffset] .. " Minor"
+            vbw["currentscale"].text = getZargamLabel(48 + currentScaleOffset - 1) .. " Minor"
         end
     end
     return ret
@@ -4900,7 +4953,7 @@ refreshDetectedChord = function()
                 if notelabels ~= "" then
                     notelabels = notelabels .. ","
                 end
-                notelabels = notelabels .. notesTable[rawnotes[i] % 12 + 1]
+                notelabels = notelabels .. getZargamLabel(rawnotes[i])
                 dummy[rawnotes[i] % 12] = 1
             end
         end
@@ -4929,18 +4982,18 @@ refreshDetectedChord = function()
         for i = 1, #distance_string do
             if distance_string ~= "" then
                 if chordsTable[distance_string[i].key] then
-                    chord = notesTable[distance_string[i].note % 12 + 1] .. " " .. chordsTable[distance_string[i].key]
+                    chord = getZargamLabel(distance_string[i].note) .. " " .. chordsTable[distance_string[i].key]
                     chordprog = romanNumeralsAndScaleDegree(currentScale, distance_string[i].note,
-                        chordsTable[distance_string[i].key])
+                            chordsTable[distance_string[i].key])
                     break
                 end
             end
         end
         if not chord and #rawnotes > 0 then
             if #rawnotes == 2 and rawnotes[1] % 12 == rawnotes[2] % 12 then
-                chord = notesTable[rawnotes[1] % 12 + 1] .. " Octave"
+                chord = getZargamLabel(rawnotes[1]) .. " Octave"
             elseif #rawnotes == 1 then
-                chord = notesTable[rawnotes[1] % 12 + 1] .. " unison"
+                chord = getZargamLabel(rawnotes[1]) .. " unison"
             end
             chordprog = romanNumeralsAndScaleDegree(currentScale, rawnotes[1])
         end
@@ -5133,9 +5186,8 @@ updateCanvas = function()
         local skipX = computeAlignedGridSkipX()
         if lpb > 0 and skipX > 0 then
             vbw["gridresolution"].text = "1/" .. tostring(lpb * 4 / skipX)
-            vbw["gridresolutiontooltip"].tooltip =
-                string.format("Grid resolution: 1/%d\n", lpb * 4 / skipX) ..
-                string.format("Zoom: %.2fx", 1 / preferences.gridXZoom.value)
+            vbw["gridresolutiontooltip"].tooltip = string.format("Grid resolution: 1/%d\n", lpb * 4 / skipX) ..
+                    string.format("Zoom: %.2fx", 1 / preferences.gridXZoom.value)
         end
     end
     --offset y of canvas
@@ -5301,7 +5353,7 @@ fillPianoRoll = function(quickRefresh)
                                 defaultColor[idx] = shadeColor(defaultColor[idx], preferences.rootKeyShadingAmount.value)
                             elseif outOfPentatnicScale then
                                 defaultColor[idx] = alphablendColors(defaultColor[idx], colorNoteHighlight2,
-                                    preferences.outOfPentatonicScaleHighlightingAmount.value)
+                                        preferences.outOfPentatonicScaleHighlightingAmount.value)
                             end
                             if notesPlaying[y + noffset] then
                                 key.color = colorStepOn
@@ -5310,18 +5362,14 @@ fillPianoRoll = function(quickRefresh)
                             end
                             --set root label
                             if preferences.keyLabels.value == 4 or
-                                (preferences.keyLabels.value == 2 and (
-                                    ((currentScale == 1 or (preferences.scaleHighlightingType.value == 5 and currentScale == 1)) and noteIndexInScale(yPLusOffMod12, true) == 0) or
-                                    isRootKey))
-                                or
-                                (preferences.keyLabels.value == 3 and
-                                    noteInScale(yPLusOffMod12))
+                                    (preferences.keyLabels.value == 2 and (
+                                            ((currentScale == 1 or (preferences.scaleHighlightingType.value == 5 and currentScale == 1)) and noteIndexInScale(yPLusOffMod12, true) == 0) or
+                                                    isRootKey))
+                                    or
+                                    (preferences.keyLabels.value == 3 and
+                                            noteInScale(yPLusOffMod12))
                             then
-                                local note = notesTable[yPLusOffMod12 + 1]
-                                if string.len(note) == 1 then
-                                    note = note .. "-"
-                                end
-                                key.text = note .. tostring(l_math_floor((y + noffset) / 12))
+                                key.text = getZargamLabel(y + noffset)
                                 if preferences.keyboardStyle.value == 2 then
                                     key.align = "left"
                                 else
@@ -5360,23 +5408,23 @@ fillPianoRoll = function(quickRefresh)
                         end
                         newNotes_length = newNotes_length + 1
                         newNotes[newNotes_length] = { c,
-                            current_note_line,
-                            current_note_step,
-                            current_note_rowIndex,
-                            current_note,
-                            current_note_len,
-                            current_note_string,
-                            current_note_vel,
-                            current_note_end_vel,
-                            current_note_pan,
-                            current_note_dly,
-                            current_note_end_dly,
-                            current_note_ins,
-                            false --note off
+                                                      current_note_line,
+                                                      current_note_step,
+                                                      current_note_rowIndex,
+                                                      current_note,
+                                                      current_note_len,
+                                                      current_note_string,
+                                                      current_note_vel,
+                                                      current_note_end_vel,
+                                                      current_note_pan,
+                                                      current_note_dly,
+                                                      current_note_end_dly,
+                                                      current_note_ins,
+                                                      false --note off
                         }
                     end
                     current_note = note
-                    current_note_string = note_string
+                    current_note_string = getZargamLabel(current_note)
                     current_note_len = 0
                     current_note_end_vel = nil
                     current_note_step = s
@@ -5402,19 +5450,19 @@ fillPianoRoll = function(quickRefresh)
                     end
                     newNotes_length = newNotes_length + 1
                     newNotes[newNotes_length] = { c,
-                        current_note_line,
-                        current_note_step,
-                        current_note_rowIndex,
-                        current_note,
-                        current_note_len,
-                        current_note_string,
-                        current_note_vel,
-                        current_note_end_vel,
-                        current_note_pan,
-                        current_note_dly,
-                        current_note_end_dly,
-                        current_note_ins,
-                        true --note off
+                                                  current_note_line,
+                                                  current_note_step,
+                                                  current_note_rowIndex,
+                                                  current_note,
+                                                  current_note_len,
+                                                  current_note_string,
+                                                  current_note_vel,
+                                                  current_note_end_vel,
+                                                  current_note_pan,
+                                                  current_note_dly,
+                                                  current_note_end_dly,
+                                                  current_note_ins,
+                                                  true --note off
                     }
                     current_note = nil
                     current_note_len = 0
@@ -5442,19 +5490,19 @@ fillPianoRoll = function(quickRefresh)
             end
             newNotes_length = newNotes_length + 1
             newNotes[newNotes_length] = { c,
-                current_note_line,
-                current_note_step,
-                current_note_rowIndex,
-                current_note,
-                current_note_len,
-                current_note_string,
-                current_note_vel,
-                current_note_end_vel,
-                current_note_pan,
-                current_note_dly,
-                current_note_end_dly,
-                current_note_ins,
-                false --note off
+                                          current_note_line,
+                                          current_note_step,
+                                          current_note_rowIndex,
+                                          current_note,
+                                          current_note_len,
+                                          current_note_string,
+                                          current_note_vel,
+                                          current_note_end_vel,
+                                          current_note_pan,
+                                          current_note_dly,
+                                          current_note_end_dly,
+                                          current_note_ins,
+                                          false --note off
             }
         end
     end
@@ -5601,10 +5649,10 @@ appNewDoc = function()
     song = renoise.song()
     --reset zoom state
     preferences.gridXZoom.value = clamp(
-        math.max(song.selected_pattern.number_of_lines, preferences.gridWidth.value) /
-        preferences.gridWidth.value,
-        defaultPreferences.gridXZoomMin,
-        defaultPreferences.gridXZoomMax)
+            math.max(song.selected_pattern.number_of_lines, preferences.gridWidth.value) /
+                    preferences.gridWidth.value,
+            defaultPreferences.gridXZoomMin,
+            defaultPreferences.gridXZoomMax)
     --reset vars
     lastTrackIndex = nil
     currentNoteVelocity = 255
@@ -5809,8 +5857,8 @@ refreshHistogramWindow = function(apply)
                     groupsmember[groupindex] = groupsmember[groupindex] + 1
                     if groupsmember[groupindex] > 1 then
                         val = val +
-                            (max / (groups[groupindex] - 1) * (groupsmember[groupindex] - 1)) *
-                            vbwp["histogramasc"].value
+                                (max / (groups[groupindex] - 1) * (groupsmember[groupindex] - 1)) *
+                                        vbwp["histogramasc"].value
                     end
                 else
                     if i > 1 then
@@ -5819,9 +5867,9 @@ refreshHistogramWindow = function(apply)
                 end
                 --apply chaos
                 val = val + (
-                    randomHistogramValues[i] *
-                    max *
-                    vbwp["histogramchaos"].value
+                        randomHistogramValues[i] *
+                                max *
+                                vbwp["histogramchaos"].value
                 )
                 --apply scale
                 val = val + ((vbwp["histogramscale"].value - 1) * (val - midVal))
@@ -6166,31 +6214,31 @@ showHistogram = function()
         }
         for i = 1, 100 do
             vbwp.histogram:add_child(
-                vb:vertical_aligner {
-                    mode = "bottom",
-                    height = 100,
-                    vbp:button {
-                        id = "histogram" .. tostring(i),
-                        width = 8,
+                    vb:vertical_aligner {
+                        mode = "bottom",
                         height = 100,
-                        active = false,
-                        color = colorVelocity,
-                    },
-                }
+                        vbp:button {
+                            id = "histogram" .. tostring(i),
+                            width = 8,
+                            height = 100,
+                            active = false,
+                            color = colorVelocity,
+                        },
+                    }
             )
         end
     end
     initHistogram()
     if not dialogVars.histogramObj or not dialogVars.histogramObj.visible then
         dialogVars.histogramObj = app:show_custom_dialog(
-            "Histogram - " .. "Simple Pianoroll v" .. manifest:property("Version").value,
-            dialogVars.histogramContent, function(_, key)
-                if key.name == "esc" then
-                    dialogVars.histogramObj:close()
-                    restoreFocus()
-                end
-                return key
-            end)
+                "Histogram - " .. "Simple Pianoroll v" .. manifest:property("Version").value,
+                dialogVars.histogramContent, function(_, key)
+                    if key.name == "esc" then
+                        dialogVars.histogramObj:close()
+                        restoreFocus()
+                    end
+                    return key
+                end)
     else
         dialogVars.histogramObj:show()
     end
@@ -6593,7 +6641,7 @@ showPenSettingsDialog = function()
                             max = 120,
                             value = chordPainterUpperNoteLimit,
                             tooltip = "Set the maximum allowable note value. Any note\n" ..
-                                "value above this threshold is transposed down.",
+                                    "value above this threshold is transposed down.",
                             notifier = function(v)
                                 chordPainterUpperNoteLimit = v
                             end,
@@ -6602,8 +6650,7 @@ showPenSettingsDialog = function()
                                 if v == 120 then
                                     text = "No"
                                 else
-                                    text = text .. notesTable[(v % 12) + 1]
-                                    text = text .. math.floor((v / 12))
+                                    text = getZargamLabel(v)
                                 end
                                 return text
                             end,
@@ -6686,7 +6733,7 @@ showPenSettingsDialog = function()
                     },
                     vbp:text {
                         text = "IMPORTANT: Please note that Renoise has a note column\n" ..
-                            "limit of 12. So there is only space for 12 notes per line."
+                                "limit of 12. So there is only space for 12 notes per line."
                     },
                     vbp:space {
                         height = 8,
@@ -6761,15 +6808,15 @@ showPenSettingsDialog = function()
         end
         --
         dialogVars.penSettingsObj = app:show_custom_dialog(
-            "Pen settings - " .. "Simple Pianoroll v" .. manifest:property("Version").value,
-            dialogVars.penSettingsContent, function(_, key)
-                if key.name == "esc" then
-                    refreshStates.refreshPianoRollNeeded = true
-                    dialogVars.penSettingsObj:close()
-                    restoreFocus()
-                end
-                return key
-            end)
+                "Pen settings - " .. "Simple Pianoroll v" .. manifest:property("Version").value,
+                dialogVars.penSettingsContent, function(_, key)
+                    if key.name == "esc" then
+                        refreshStates.refreshPianoRollNeeded = true
+                        dialogVars.penSettingsObj:close()
+                        restoreFocus()
+                    end
+                    return key
+                end)
     else
         dialogVars.penSettingsObj:show()
     end
@@ -7098,7 +7145,7 @@ executeToolAction = function(action, allWhenNothingSelected, param1, param2)
             local newSelection = {}
             for i = 1, #noteSelection do
                 if (i % 2 == 0 and action == "odddeselect_selection")
-                    or (i % 2 == 1 and action == "evendeselect_selection")
+                        or (i % 2 == 1 and action == "evendeselect_selection")
                 then
                     table.insert(newSelection, noteSelection[i])
                 end
@@ -7138,12 +7185,12 @@ handleTimelineMouse = function(event)
         end
     elseif event.direction == "down" or (type(event.direction) == "number" and event.direction > 0) then
         preferences.gridXZoom.value = clamp(preferences.gridXZoom.value + amount, defaultPreferences.gridXZoomMin,
-            dynMaxZoom)
+                dynMaxZoom)
         refreshStates.refreshAfterPreferencesClose = true
         --end
     elseif event.direction == "up" or (type(event.direction) == "number" and event.direction < 0) then
         preferences.gridXZoom.value = clamp(preferences.gridXZoom.value - amount, defaultPreferences.gridXZoomMin,
-            dynMaxZoom)
+                dynMaxZoom)
         refreshStates.refreshAfterPreferencesClose = true
     end
     --set new max for stepslider
@@ -7353,15 +7400,15 @@ handleKeyEvent = function(keyEvent, mouseXPosition)
     end
     if key.modifiers == "control" and (
             key.name == "1" or
-            key.name == "2" or
-            key.name == "3" or
-            key.name == "4" or
-            key.name == "5" or
-            key.name == "6" or
-            key.name == "7" or
-            key.name == "8" or
-            key.name == "9"
-        ) then
+                    key.name == "2" or
+                    key.name == "3" or
+                    key.name == "4" or
+                    key.name == "5" or
+                    key.name == "6" or
+                    key.name == "7" or
+                    key.name == "8" or
+                    key.name == "9"
+    ) then
         if key.state == "pressed" and not key.repeated then
             keyInfoText = "Change note length to " .. key.name
             if #noteSelection > 0 then
@@ -7522,7 +7569,7 @@ handleKeyEvent = function(keyEvent, mouseXPosition)
                     changePropertiesOfSelectedNotes(-steps, nil, nil, nil, nil, nil, nil, "add")
                     --play new velocity
                     triggerNoteOfCurrentInstrument(noteSelection[1].note, nil, noteSelection[1].vel, true,
-                        noteSelection[1].ins)
+                            noteSelection[1].ins)
                 elseif #noteSelection > 0 and modifier.keyShift and not modifier.keyAlt and not modifier.keyControl then
                     steps = -steps
                     keyInfoText = "Move notes by " .. steps .. " micro steps"
@@ -7580,7 +7627,7 @@ handleKeyEvent = function(keyEvent, mouseXPosition)
             end
             if #noteSelection > 0 and not modifier.keyAlt then
                 transposeSelectedNotes(transpose,
-                    (modifier.keyControl or modifier.keyRControl) and not (modifier.keyShift or modifier.keyRShift))
+                        (modifier.keyControl or modifier.keyRControl) and not (modifier.keyShift or modifier.keyRShift))
                 keyInfoText = "Transpose selected notes"
                 if (modifier.keyControl or modifier.keyRControl) and not (modifier.keyShift or modifier.keyRShift) then
                     keyInfoText = keyInfoText .. ", keep in scale"
@@ -7883,7 +7930,7 @@ refreshSelectedNotes = function()
         end
         rowIndex = noteValue2GridRowOffset(noteSelection[key].note, true)
         noteSelection[key].idx = tostring(noteSelection[key].step) ..
-            "_" .. tostring(rowIndex) .. "_" .. tostring(noteSelection[key].column)
+                "_" .. tostring(rowIndex) .. "_" .. tostring(noteSelection[key].column)
         noteString = lineValues[noteSelection[key].line]:note_column(noteSelection[key].column).note_string
         newNotes_length = newNotes_length + 1
         newNotes[newNotes_length] = {
@@ -7975,10 +8022,12 @@ handleInvisibleLasso = function(event, addToSelection)
         while not (x == x1 and y == y1) do
             local e2 = 2 * err
             if e2 >= dy then
-                err = err + dy; x = x + sx
+                err = err + dy;
+                x = x + sx
             end
             if e2 <= dx then
-                err = err + dx; y = y + sy
+                err = err + dx;
+                y = y + sy
             end
 
             -- record current raster cell
@@ -8010,9 +8059,9 @@ handleInvisibleLasso = function(event, addToSelection)
 
                 -- ray casting against notes (even–odd rule)
                 for _, note_data in pairs(noteData) do
-                    local noteStart  = note_data.step
-                    local noteEnd    = note_data.step + note_data.len - 1
-                    local noteY      = note_data.note
+                    local noteStart = note_data.step
+                    local noteEnd = note_data.step + note_data.len - 1
+                    local noteY = note_data.note
                     local noteInside = false
 
                     -- sweep along the note's time span to test inclusion
@@ -8049,9 +8098,9 @@ handleInvisibleLasso = function(event, addToSelection)
                         local dup_idx = nil
                         for k, selectedNote in pairs(newNoteSelection) do
                             if selectedNote.step == note_data.step and
-                                selectedNote.len == note_data.len and
-                                selectedNote.dly == note_data.dly and
-                                selectedNote.note == note_data.note then
+                                    selectedNote.len == note_data.len and
+                                    selectedNote.dly == note_data.dly and
+                                    selectedNote.note == note_data.note then
                                 dup_idx = k
                                 break
                             end
@@ -8093,11 +8142,11 @@ handleMouse = function(event)
 
     --filter out bad move events from modifier keys, bug 3.5.4
     if xypadpos.last_x
-        and (event.type == "move" or event.type == "drag")
-        and event.modifier_flags.control == false
-        and event.modifier_flags.shift == false
-        and event.modifier_flags.super == false
-        and event.modifier_flags.alt == false
+            and (event.type == "move" or event.type == "drag")
+            and event.modifier_flags.control == false
+            and event.modifier_flags.shift == false
+            and event.modifier_flags.super == false
+            and event.modifier_flags.alt == false
     then
         local dist = math.sqrt((xypadpos.last_x - event.position.x) ^ 2 + (xypadpos.last_y - event.position.y) ^ 2)
         if dist > 100 then
@@ -8164,8 +8213,8 @@ handleMouse = function(event)
 
         if event.type == "drag" and (event.button_flags["left"] or event.button_flags["right"] or event.button_flags["middle"]) then
             if event.button_flags["right"] and
-                not event.button_flags["left"] and
-                not event.button_flags["middle"] then
+                    not event.button_flags["left"] and
+                    not event.button_flags["middle"] then
                 if checkMode("pen") and not xypadpos.removemode then
                     xypadpos.removemode = true
                     if xypadpos.mousepreview then
@@ -8176,8 +8225,8 @@ handleMouse = function(event)
                     xypadpos.previewmode = true
                 end
             elseif event.button_flags["middle"] and
-                not event.button_flags["left"] and
-                not event.button_flags["right"] then
+                    not event.button_flags["left"] and
+                    not event.button_flags["right"] then
                 if checkMode("pen") and not xypadpos.previewmode then
                     xypadpos.previewmode = true
                 end
@@ -8187,8 +8236,8 @@ handleMouse = function(event)
                 for key in pairs(noteData) do
                     local note_data = noteData[key]
                     if posInNoteRange(val_x + stepOffset, note_data) and #noteSelection == 0
-                        and note_data.note == math.floor((val_y - 1.1) + noteOffset)
-                        and not noteInSelection(note_data) then
+                            and note_data.note == math.floor((val_y - 1.1) + noteOffset)
+                            and not noteInSelection(note_data) then
                         updateNoteSelection(note_data, true, true)
                         break
                     elseif noteInSelection(note_data) then
@@ -8293,7 +8342,7 @@ handleMouse = function(event)
                         if note_data then
                             if modifier.keyAlt and isDelayColumnActive() then
                                 v = math.floor((val_x - (xypadpos.nx + note_data.len + (note_data.end_dly / 0x100))) *
-                                    0x100)
+                                        0x100)
                                 --calculate snap
                                 local delay = (note_data.end_dly + v) % 0x100
                                 local len = math.floor((note_data.end_dly + v) / 0x100)
@@ -8313,7 +8362,7 @@ handleMouse = function(event)
                                     minGridStep = 1
                                 end
                                 v = snapDown(math.floor((val_x - (xypadpos.nx + note_data.len)) * 0x100 - note_data
-                                    .end_dly) / 0x100 + (0.5 * minGridStep), minGridStep) * 0x100
+                                        .end_dly) / 0x100 + (0.5 * minGridStep), minGridStep) * 0x100
                                 if note_data.len + math.floor((note_data.end_dly + v) / 0x100) < minGridStep then
                                     v = 0
                                 end
@@ -8336,8 +8385,8 @@ handleMouse = function(event)
                         --set velocity while drawing feature
                         if preferences.setVelocityWhenDrawingNotes.value and xypadpos.wasnewnote and not xypadpos.resetscale then
                             local newvel = clamp(
-                                math.floor(math.min(128, xypadpos.nvel) + ((val_y - xypadpos.ny) * gridStepSizeH)),
-                                0, 128)
+                                    math.floor(math.min(128, xypadpos.nvel) + ((val_y - xypadpos.ny) * gridStepSizeH)),
+                                    0, 128)
                             if newvel == 128 then
                                 newvel = 255
                             end
@@ -8510,13 +8559,13 @@ handleMouse = function(event)
             if #event.hover_views > 0 then
                 local el = vbw[event.hover_views[1]['id']]
                 if event.hover_views[1]['id'] == 'canvas' or
-                    event.hover_views[1]['id'] == 'canvas_ghosttrack' then
+                        event.hover_views[1]['id'] == 'canvas_ghosttrack' then
                     type = "g"
                     x = math.floor(val_x)
                     y = math.floor(val_y)
                 else
                     type, x, y, c = string.match(event.hover_views[1]['id'],
-                        '^([br]+)([-0-9]+)_([0-9]+)_([0-9]+)[_]?[0-9]?[0-9]?$')
+                            '^([br]+)([-0-9]+)_([0-9]+)_([0-9]+)[_]?[0-9]?[0-9]?$')
                     if type and x and y and c then
                         if type == "b" or type == "br" then
                             local index = tostring(x) .. "_" .. tostring(y) .. "_" .. tostring(c)
@@ -8524,8 +8573,8 @@ handleMouse = function(event)
                             xypadpos.mouseCursor = "move"
                             forceScaling = false
                             if type == "b"
-                                and note_data.step + note_data.len - 1 <= gridWidthScaled
-                                and event.position['x'] >= el.origin.x + el.width - preferences.clickAreaSizeForScalingPx.value
+                                    and note_data.step + note_data.len - 1 <= gridWidthScaled
+                                    and event.position['x'] >= el.origin.x + el.width - preferences.clickAreaSizeForScalingPx.value
                             then
                                 xypadpos.mouseCursor = "resize_horizontal"
                                 forceScaling = true
@@ -8538,8 +8587,8 @@ handleMouse = function(event)
 
             if event.type == "down" and (
                     (checkMode("pen") and event.button == "middle") or
-                    checkMode("preview")
-                ) then
+                            checkMode("preview")
+            ) then
                 xypadpos.previewmode = true
                 event.type = "drag"
                 return handleMouse(event)
@@ -8676,7 +8725,7 @@ appIdleEvent = function()
         local editpos = (transport.edit_pos.line / 1000) + transport.edit_pos.sequence
         if editpos >= math.floor(loopstart) and editpos <= math.ceil(loopend) and not (transport.loop_start_beats == 0 and transport.loop_end_beats == transport.song_length_beats) then
             currentloopingrange = tostring(transport.loop_start) ..
-                "-" .. tostring(transport.loop_end) .. "-" .. tostring(transport.edit_pos)
+                    "-" .. tostring(transport.loop_end) .. "-" .. tostring(transport.edit_pos)
         end
         if loopingrange ~= currentloopingrange then
             loopingrange = currentloopingrange
@@ -8686,7 +8735,7 @@ appIdleEvent = function()
         --instrument scale obs
         if preferences.scaleHighlightingType.value == 4 and currentInstrument and song.instruments[currentInstrument + 1] then
             local temp = tostring(song.instruments[currentInstrument + 1].trigger_options.scale_key) ..
-                tostring(song.instruments[currentInstrument + 1].trigger_options.scale_mode)
+                    tostring(song.instruments[currentInstrument + 1].trigger_options.scale_mode)
             if temp ~= instrumentScaleMode then
                 instrumentScaleMode = temp
                 refreshStates.refreshPianoRollNeeded = true
@@ -8721,7 +8770,7 @@ appIdleEvent = function()
             for i = 1, #lastTriggerNote do
                 if lastTriggerNote[i].time < now - (preferences.triggerTime.value / 1000) then
                     song:trigger_instrument_note_off(lastTriggerNote[i].instrument_index, lastTriggerNote[i].track_index,
-                        lastTriggerNote[i].note)
+                            lastTriggerNote[i].note)
                 else
                     table.insert(newLastTriggerNote, lastTriggerNote[i])
                 end
@@ -8842,16 +8891,16 @@ showSetScaleDialog = function()
     end
     if not dialogVars.setScaleObj or not dialogVars.setScaleObj.visible then
         dialogVars.setScaleObj = app:show_custom_dialog(
-            "Scale highlighting - " .. "Simple Pianoroll v" .. manifest:property("Version").value,
-            dialogVars.setScaleContent, function(_, key)
-                if key.name == "esc" then
-                    refreshStates.updateGridCanvas = true
-                    refreshStates.refreshPianoRollNeeded = true
-                    dialogVars.setScaleObj:close()
-                    restoreFocus()
-                end
-                return key
-            end)
+                "Scale highlighting - " .. "Simple Pianoroll v" .. manifest:property("Version").value,
+                dialogVars.setScaleContent, function(_, key)
+                    if key.name == "esc" then
+                        refreshStates.updateGridCanvas = true
+                        refreshStates.refreshPianoRollNeeded = true
+                        dialogVars.setScaleObj:close()
+                        restoreFocus()
+                    end
+                    return key
+                end)
     else
         dialogVars.setScaleObj:show()
     end
@@ -9284,7 +9333,7 @@ showPreferences = function()
                                         initColors()
                                         vbwp.colorBaseGridColor.color = colorBaseGridColor
                                         vbwp.colorBaseGridColorField.value = convertColorValueToString(
-                                            colorBaseGridColor)
+                                                colorBaseGridColor)
                                     end
                                 },
                                 vbp:button {
@@ -9325,7 +9374,7 @@ showPreferences = function()
                                         initColors()
                                         vbwp.colorNoteHighlight.color = colorNoteHighlight
                                         vbwp.colorNoteHighlightField.value = convertColorValueToString(
-                                            colorNoteHighlight)
+                                                colorNoteHighlight)
                                     end
                                 },
                                 vbp:button {
@@ -9346,7 +9395,7 @@ showPreferences = function()
                                         initColors()
                                         vbwp.colorNoteHighlight2.color = colorNoteHighlight2
                                         vbwp.colorNoteHighlight2Field.value = convertColorValueToString(
-                                            colorNoteHighlight2)
+                                                colorNoteHighlight2)
                                     end
                                 },
                                 vbp:button {
@@ -9567,7 +9616,7 @@ showPreferences = function()
                                         initColors()
                                         vbwp.colorLoopSelection.color = colorLoopSelection
                                         vbwp.colorLoopSelectionField.value = convertColorValueToString(
-                                            colorLoopSelection)
+                                                colorLoopSelection)
                                     end
                                 },
                                 vbp:button {
@@ -9615,8 +9664,8 @@ showPreferences = function()
                         },
                         vbp:text {
                             text = "IMPORTANT: Please note that color #000000\n" ..
-                                "will use the default control theme color. It's a\n" ..
-                                "Renoise Viewbuilder restriction, which can't be\n" .. "changed, yet."
+                                    "will use the default control theme color. It's a\n" ..
+                                    "Renoise Viewbuilder restriction, which can't be\n" .. "changed, yet."
                         },
                     },
                     vbp:column {
@@ -10076,7 +10125,7 @@ showPreferences = function()
                                     "Reset to default",
                                     "Are you sure you want to reset all settings to their default values?",
                                     { "Yes", "No" }
-                                ) == "Yes" then
+                            ) == "Yes" then
                                 for key in pairs(defaultPreferences) do
                                     if preferences[key] then
                                         preferences[key].value = defaultPreferences[key]
@@ -10092,7 +10141,7 @@ showPreferences = function()
                         width = 100,
                         notifier = function()
                             app:open_url(
-                                "https://forum.renoise.com/t/simple-pianoroll-com-duftetools-simplepianoroll-xrnx/63034")
+                                    "https://forum.renoise.com/t/simple-pianoroll-com-duftetools-simplepianoroll-xrnx/63034")
                             dialogVars.preferencesObj:close()
                         end
                     }
@@ -10127,8 +10176,8 @@ showPreferences = function()
     end
     if not dialogVars.preferencesObj or not dialogVars.preferencesObj.visible then
         dialogVars.preferencesObj = app:show_custom_dialog(
-            "Preferences - " .. "Simple Pianoroll v" .. manifest:property("Version").value, dialogVars
-            .preferencesContent)
+                "Preferences - " .. "Simple Pianoroll v" .. manifest:property("Version").value, dialogVars
+                        .preferencesContent)
     else
         dialogVars.preferencesObj:show()
     end
@@ -10223,7 +10272,7 @@ createPianoRollDialog = function(gridWidth, gridHeight, gridStepSizeW, gridStepS
 
                     --base grid
                     context.stroke_color = shadeColor(colorBaseGridColor,
-                        preferences.outOfNoteScaleShadingAmount.value + 0.2)
+                            preferences.outOfNoteScaleShadingAmount.value + 0.2)
                     for y = 0, gH do
                         context:begin_path()
                         context:move_to(0, y * h)
@@ -10259,12 +10308,12 @@ createPianoRollDialog = function(gridWidth, gridHeight, gridStepSizeW, gridStepS
 
                     --octave lines
                     context.stroke_color = shadeColor(colorBaseGridColor,
-                        preferences.outOfNoteScaleShadingAmount.value + 0.5)
+                            preferences.outOfNoteScaleShadingAmount.value + 0.5)
                     for y = 0, gH do
                         if
-                            currentScaleOffset and (
+                        currentScaleOffset and (
                                 (preferences.gridHLines.value == 2 and (gH - y) % 12 == 1) or
-                                (preferences.gridHLines.value == 3 and (gH - y - currentScaleOffset) % 12 == 0))
+                                        (preferences.gridHLines.value == 3 and (gH - y - currentScaleOffset) % 12 == 0))
                         then
                             context:begin_path()
                             context:move_to(0, (y + 1) * h)
@@ -10276,7 +10325,7 @@ createPianoRollDialog = function(gridWidth, gridHeight, gridStepSizeW, gridStepS
                     --bar lines
                     for x = 0, gW do
                         if (preferences.gridVLines.value == 2 and (x + stepOffset) % (lpb * 4) == 0) or
-                            (preferences.gridVLines.value == 3 and (x + stepOffset) % lpb == 0)
+                                (preferences.gridVLines.value == 3 and (x + stepOffset) % lpb == 0)
                         then
                             context:begin_path()
                             context:move_to(x * w, 0)
@@ -10287,7 +10336,7 @@ createPianoRollDialog = function(gridWidth, gridHeight, gridStepSizeW, gridStepS
 
                     --beat lines
                     context.stroke_color = shadeColor(colorBaseGridColor,
-                        preferences.outOfNoteScaleShadingAmount.value + 0.25)
+                            preferences.outOfNoteScaleShadingAmount.value + 0.25)
                     for x = 0, gW do
                         if (preferences.gridVLines.value == 2 and (x + stepOffset) % lpb == 0)
                         then
@@ -10302,7 +10351,7 @@ createPianoRollDialog = function(gridWidth, gridHeight, gridStepSizeW, gridStepS
                     context.fill_color = { 0, 0, 0, 100 * preferences.oddBarsShadingAmount.value }
                     for x = lpb * -8, gW do
                         if (preferences.gridVLines.value == 2 and (x + stepOffset + (lpb * 4)) % (lpb * 8) == 0) or
-                            (preferences.gridVLines.value == 3 and (x + stepOffset + lpb) % (lpb * 2) == 0)
+                                (preferences.gridVLines.value == 3 and (x + stepOffset + lpb) % (lpb * 2) == 0)
                         then
                             context:begin_path()
                             context:move_to(x * w, 0)
@@ -10402,7 +10451,7 @@ createPianoRollDialog = function(gridWidth, gridHeight, gridStepSizeW, gridStepS
                                     end
                                 end
                             end
-                            ::continue::
+                            :: continue ::
                         end
                         context:fill()
                     end
@@ -10429,7 +10478,7 @@ createPianoRollDialog = function(gridWidth, gridHeight, gridStepSizeW, gridStepS
                     local w, h = context.size.width / gW, context.size.height / gridHeight
                     local rx, rx2 = math.min(xypadpos.nx, xypadpos.x) - 1, math.max(xypadpos.nx, xypadpos.x)
                     local ry, ry2 = gridHeight - math.max(xypadpos.ny, xypadpos.y),
-                        gridHeight - math.min(xypadpos.ny, xypadpos.y) + 1
+                    gridHeight - math.min(xypadpos.ny, xypadpos.y) + 1
                     -- Draws a rectangle based on the current xypadpos coordinates
                     context:move_to(rx * w, ry * h)
                     context:line_to(rx2 * w, ry * h)
@@ -10491,19 +10540,19 @@ createPianoRollDialog = function(gridWidth, gridHeight, gridStepSizeW, gridStepS
     }
     for y = gridHeight, 1, -1 do
         whiteKeys:add_child(
-            vb:button {
-                id = "k" .. tostring(y),
-                height = gridStepSizeH,
-                width = pianoKeyWidth,
-                color = { 255, 255, 255 },
-                pressed = loadstring("keyClick(" .. y .. ",true)"),
-                released = loadstring("keyClick(" .. y .. ",false)"),
-                visible = true,
-                origin = {
-                    x = -1,
-                    y = (gridStepSizeH * (gridHeight - y)) - 2
+                vb:button {
+                    id = "k" .. tostring(y),
+                    height = gridStepSizeH,
+                    width = pianoKeyWidth,
+                    color = { 255, 255, 255 },
+                    pressed = loadstring("keyClick(" .. y .. ",true)"),
+                    released = loadstring("keyClick(" .. y .. ",false)"),
+                    visible = true,
+                    origin = {
+                        x = -1,
+                        y = (gridStepSizeH * (gridHeight - y)) - 2
+                    }
                 }
-            }
         )
     end
 
@@ -10525,7 +10574,7 @@ createPianoRollDialog = function(gridWidth, gridHeight, gridStepSizeW, gridStepS
             notifier = function(n)
                 local transport = song.transport
                 local nScaled = math.ceil(n / defaultPreferences.sliderResolution * preferences.gridWidth.value *
-                    preferences.gridXZoom.value)
+                        preferences.gridXZoom.value)
                 local looppos = math.floor(nScaled + 0.4) + stepOffset
                 local newloopset = false
                 if modifier.keyControl and not modifier.keyShift then
@@ -10562,7 +10611,7 @@ createPianoRollDialog = function(gridWidth, gridHeight, gridStepSizeW, gridStepS
                                 xypadpos.loopslider = looppos - x
                             end
                             local newlooppos = math.min(song.selected_pattern.number_of_lines - len + 1,
-                                math.max(looppos - xypadpos.loopslider, 1))
+                                    math.max(looppos - xypadpos.loopslider, 1))
                             song.transport.loop_range = {
                                 renoise.SongPos(transport.edit_pos.sequence, newlooppos),
                                 renoise.SongPos(transport.edit_pos.sequence, newlooppos + len)
@@ -10578,9 +10627,9 @@ createPianoRollDialog = function(gridWidth, gridHeight, gridStepSizeW, gridStepS
                 if newloopset then
                     --when new end loop is before current playback pos, restart from loop start
                     if song.transport.playing
-                        and song.transport.playback_pos.sequence == song.transport.loop_start.sequence
-                        and song.transport.playback_pos.sequence == song.transport.loop_end.sequence
-                        and song.transport.playback_pos.line >= song.transport.loop_end.line
+                            and song.transport.playback_pos.sequence == song.transport.loop_start.sequence
+                            and song.transport.playback_pos.sequence == song.transport.loop_end.sequence
+                            and song.transport.playback_pos.line >= song.transport.loop_end.line
                     then
                         playPatternFromLine()
                     end
@@ -10743,8 +10792,8 @@ createPianoRollDialog = function(gridWidth, gridHeight, gridStepSizeW, gridStepS
                         width = 126,
                         notifier = function(idx)
                             local val = string.match(
-                                vbw.ins.items[idx],
-                                '%[([0-9A-Z-]+)%]$'
+                                    vbw.ins.items[idx],
+                                    '%[([0-9A-Z-]+)%]$'
                             )
                             if val and vbw["ins"].active then
                                 currentInstrument = fromRenoiseHex(val)
@@ -10776,7 +10825,7 @@ createPianoRollDialog = function(gridWidth, gridHeight, gridStepSizeW, gridStepS
                                 elseif plugin and not plugin.plugin_device then
                                     --switch to instrument settings
                                     app.window.active_middle_frame = renoise.ApplicationWindow
-                                        .MIDDLE_FRAME_INSTRUMENT_SAMPLE_EDITOR
+                                                                            .MIDDLE_FRAME_INSTRUMENT_SAMPLE_EDITOR
                                     --close piano roll
                                     if windowObj and windowObj.visible then
                                         windowObj:close()
@@ -11366,12 +11415,12 @@ createPianoRollDialog = function(gridWidth, gridHeight, gridStepSizeW, gridStepS
                                                         bitmap = "Icons/Mixer_ShowDelay.bmp",
                                                         mode = "transparent",
                                                         tooltip = "Scale degree and roman numeral\n\n" ..
-                                                            "Can help in creating chord progressions. Some common chord progressions used are:\n\n" ..
-                                                            "I V IV vi - Axis of Awesome\nvi IV I V - Axis of Awesome\n" ..
-                                                            "i bVII bVI V - Andalusian cadence\nI vi IV V - doo-wop progression\n" ..
-                                                            "I bVII IV I - Mixolydian Vamp\nIV V7 iii vi - Common japanese chords\n" ..
-                                                            "IV V7 vi - Common japanese chords\nii V I - Jazz chord progression / Changing key progression\n\n" ..
-                                                            "And there are more ... :)",
+                                                                "Can help in creating chord progressions. Some common chord progressions used are:\n\n" ..
+                                                                "I V IV vi - Axis of Awesome\nvi IV I V - Axis of Awesome\n" ..
+                                                                "i bVII bVI V - Andalusian cadence\nI vi IV V - doo-wop progression\n" ..
+                                                                "I bVII IV I - Mixolydian Vamp\nIV V7 iii vi - Common japanese chords\n" ..
+                                                                "IV V7 vi - Common japanese chords\nii V I - Jazz chord progression / Changing key progression\n\n" ..
+                                                                "And there are more ... :)",
                                                     },
                                                 },
                                                 vb:space {
@@ -11440,8 +11489,7 @@ createPianoRollDialog = function(gridWidth, gridHeight, gridStepSizeW, gridStepS
                                                         width = 24,
                                                         tooltip = "Show/Hide tool panel ...",
                                                         notifier = function()
-                                                            preferences.showToolPanel.value =
-                                                                not preferences.showToolPanel.value
+                                                            preferences.showToolPanel.value = not preferences.showToolPanel.value
                                                             vbw.toolpanel.visible = preferences.showToolPanel.value
                                                             refreshStates.refreshControls = true
                                                         end,
@@ -11932,10 +11980,10 @@ main_function = function(hidden)
             pianoKeyWidth = gridStepSizeW * 4
             --reset zoom state
             preferences.gridXZoom.value = clamp(
-                math.max(song.selected_pattern.number_of_lines, preferences.gridWidth.value) /
-                preferences.gridWidth.value,
-                defaultPreferences.gridXZoomMin,
-                defaultPreferences.gridXZoomMax)
+                    math.max(song.selected_pattern.number_of_lines, preferences.gridWidth.value) /
+                            preferences.gridWidth.value,
+                    defaultPreferences.gridXZoomMin,
+                    defaultPreferences.gridXZoomMax)
             --limit gridHeight
             preferences.gridHeight.value = clamp(preferences.gridHeight.value, 16, 64)
             gridHeight = preferences.gridHeight.value
@@ -11955,7 +12003,7 @@ main_function = function(hidden)
         --center note view
         if lowestNote ~= nil and preferences.centerViewOnOpen.value then
             noteOffset = clamp(math.floor(((lowestNote + highestNote) / 2) - (gridHeight / 2)), 0,
-                noteSlider.max - noteSlider.pagestep)
+                    noteSlider.max - noteSlider.pagestep)
         end
         setScrollbarValue(noteSlider.max - noteSlider.pagestep - noteOffset, noteSlider)
 
@@ -11964,20 +12012,20 @@ main_function = function(hidden)
         refreshStates.rebuildWindowDialog = false
         --show dialog
         windowObj = app:show_custom_dialog("Simple Pianoroll v" .. manifest:property("Version").value, windowContent,
-            function(_, key)
-                local handled
-                --always disable edit mode because of side effects
-                song.transport.edit_mode = false
-                --process key shortcuts
-                handled = handleKeyEvent(key)
-                --return key to host
-                if not handled then
-                    return key
-                end
-            end, {
-                send_key_repeat = true,
-                send_key_release = true,
-            })
+                function(_, key)
+                    local handled
+                    --always disable edit mode because of side effects
+                    song.transport.edit_mode = false
+                    --process key shortcuts
+                    handled = handleKeyEvent(key)
+                    --return key to host
+                    if not handled then
+                        return key
+                    end
+                end, {
+                    send_key_repeat = true,
+                    send_key_release = true,
+                })
         --stay hidden, if needed
         if hidden then
             windowObj:close()
@@ -12252,13 +12300,13 @@ tool:add_menu_entry {
     name = "Main Menu:Tools:Simple Pianoroll:Tools:Upgrade filters of all instruments ...",
     invoke = function()
         local res = app:show_custom_prompt(
-            "Upgrade filters of all instruments - " .. "Simple Pianoroll v" .. manifest:property("Version").value,
-            renoise.ViewBuilder():vertical_aligner {
-                renoise.ViewBuilder():space {
-                    height = 10,
-                }
-            },
-            { 'Upgrade filters', 'Upgrade filters and enable anti aliasing', 'Cancel' }
+                "Upgrade filters of all instruments - " .. "Simple Pianoroll v" .. manifest:property("Version").value,
+                renoise.ViewBuilder():vertical_aligner {
+                    renoise.ViewBuilder():space {
+                        height = 10,
+                    }
+                },
+                { 'Upgrade filters', 'Upgrade filters and enable anti aliasing', 'Cancel' }
         )
         if res ~= '' or res ~= 'Cancel' then
             for _, i in pairs(renoise.song().instruments) do
@@ -12284,9 +12332,9 @@ switchVSTFxReference = function(type)
             for id, device in ipairs(track.devices) do
                 if type == 3 then
                     if device.name == "VST: Xfer Records: LFOTool_x64"
-                        or device.name == "VST: Cableguys: ShaperBox 3"
-                        or device.name == "VST: schulz.audio: Oszillos Mega Scope"
-                        or device.name == "VST: Excite Audio: VISION 4X"
+                            or device.name == "VST: Cableguys: ShaperBox 3"
+                            or device.name == "VST: schulz.audio: Oszillos Mega Scope"
+                            or device.name == "VST: Excite Audio: VISION 4X"
                     then
                         device.external_editor_visible = not device.external_editor_visible
                         return
@@ -12306,7 +12354,7 @@ switchVSTFxReference = function(type)
                                         renoise.song().tracks[it].devices[id].parameters[ip]:record_value(0)
                                     else
                                         renoise.song().tracks[it].devices[id].parameters[ip]:record_value(lastValTools
-                                            .lastRefValue)
+                                                .lastRefValue)
                                     end
                                     return
                                 end
@@ -12454,9 +12502,9 @@ if preferences.enableAdditionalSampleToolsContextMenu.value then
                 }
 
                 res = app:show_custom_prompt(
-                    "Set sample BPM - " .. "Simple Pianoroll v" .. manifest:property("Version").value,
-                    view,
-                    { 'Repitch', 'Percussion', 'Texture', 'Cancel' }
+                        "Set sample BPM - " .. "Simple Pianoroll v" .. manifest:property("Version").value,
+                        view,
+                        { 'Repitch', 'Percussion', 'Texture', 'Cancel' }
                 )
                 bpm = bpm_selector.value
             end
@@ -12512,7 +12560,7 @@ if preferences.enableAdditionalSampleToolsContextMenu.value then
                     sample.autoseek = true
                 else
                     app:show_warning("Sample is too long, calculated beat sync value is higher than 512 (" ..
-                        math.floor(lines_in_sample + 0.5) .. " calculated)!")
+                            math.floor(lines_in_sample + 0.5) .. " calculated)!")
                 end
             end
         end
@@ -12545,7 +12593,7 @@ if preferences.enableAdditionalSampleToolsContextMenu.value then
                 for _, current_patterntrack in ipairs(current_pattern.tracks) do
                     for line_idx = 1, pattern_length do
                         current_patterntrack:line(line_idx + pattern_length):copy_from(current_patterntrack:line(
-                            line_idx))
+                                line_idx))
                     end
                 end
             end
@@ -12591,10 +12639,10 @@ if preferences.enableAdditionalSampleToolsContextMenu.value then
                 },
             }
             local res = app:show_custom_prompt(
-                "Change instrument's global pitch (" ..
-                (to - from + 1) .. " instrument's) - " .. "Simple Pianoroll v" .. manifest:property("Version").value,
-                view,
-                { 'Ok', 'Cancel' }
+                    "Change instrument's global pitch (" ..
+                            (to - from + 1) .. " instrument's) - " .. "Simple Pianoroll v" .. manifest:property("Version").value,
+                    view,
+                    { 'Ok', 'Cancel' }
             )
             if res == 'Ok' then
                 --apply new transpose value
@@ -12620,9 +12668,9 @@ if preferences.enableAdditionalSampleToolsContextMenu.value then
                 local align_to_lines
 
                 local mpt = app:show_prompt(
-                    "Align sample selection to beat - " .. "Simple Pianoroll v" .. manifest:property("Version").value,
-                    "Please choose one of the following sizes to enlarge the sample selection:",
-                    { "8", "16", "32", "64", "96", "128", "256", "Cancel" }
+                        "Align sample selection to beat - " .. "Simple Pianoroll v" .. manifest:property("Version").value,
+                        "Please choose one of the following sizes to enlarge the sample selection:",
+                        { "8", "16", "32", "64", "96", "128", "256", "Cancel" }
                 )
 
                 if (mpt == "8") then
