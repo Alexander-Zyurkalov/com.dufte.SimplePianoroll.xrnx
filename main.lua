@@ -194,6 +194,16 @@ local getZargamLabel = function(note_value)
     end
 end
 
+-- helper function to check if a relative note index is a structural pillar (Za, Ma, Pa)
+function isZargamPillar(note_value)
+    local tonic = 0
+    if currentScaleOffset then
+        tonic = currentScaleOffset - 1
+    end
+    local rel = (note_value - tonic) % 12
+    return rel == 0 or rel == 5 or rel == 7
+end
+
 local scaleTypes = {
     "None",
     "Major scale",
@@ -10306,7 +10316,7 @@ createPianoRollDialog = function(gridWidth, gridHeight, gridStepSizeW, gridStepS
                     context.fill_color = shadeColor(colorBaseGridColor, preferences.outOfNoteScaleShadingAmount.value)
                     for y = 0, gH do
                         local yPLusOffMod12 = (gH - y - 1) % 12
-                        if not noteInScale(yPLusOffMod12) then
+                        if isZargamPillar(yPLusOffMod12) then
                             context:begin_path()
                             context:move_to(0, y * h)
                             context:line_to(w * gW, y * h)
