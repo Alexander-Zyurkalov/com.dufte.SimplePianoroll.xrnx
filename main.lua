@@ -4707,9 +4707,9 @@ setScaleHighlighting = function(afterPianoRollRefresh)
         if currentScale == 1 then
             vbw["currentscale"].text = "None"
         elseif currentScale == 2 then
-            vbw["currentscale"].text = getZargamLabel(48 + currentScaleOffset - 1) .. " Major"
+            vbw["currentscale"].text = notesTable[currentScaleOffset] .. " Major"
         elseif currentScale == 3 then
-            vbw["currentscale"].text = getZargamLabel(48 + currentScaleOffset - 1) .. " Minor"
+            vbw["currentscale"].text = notesTable[currentScaleOffset] .. " Minor"
         end
     end
     return ret
