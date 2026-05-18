@@ -5389,7 +5389,6 @@ fillPianoRoll = function(quickRefresh)
                 --render notes
                 local note_column = lineValues[line]:note_column(c)
                 local note = note_column.note_value
-                local note_string = note_column.note_string
                 local volume_string = note_column.volume_string
                 local panning_string = note_column.panning_string
                 local delay_string = note_column.delay_string
@@ -5829,6 +5828,10 @@ refreshHistogramWindow = function(apply)
         midVal = (minVal + maxVal) / 2
         vbwp.histomin.text = tostring(min)
         vbwp.histomax.text = tostring(max)
+        if vbwp["histogrammode"].value == 4 then
+            vbwp.histomin.text = getZargamLabel(min)
+            vbwp.histomax.text = getZargamLabel(max)
+        end
         for i = 1, #noteSelection do
             if vbwp["histogramasctype"].value == 2 then
                 groupindex = noteSelection[i].line
@@ -6655,29 +6658,72 @@ showPenSettingsDialog = function()
                                 return text
                             end,
                             tonumber = function(v)
-                                local note, oct
-                                v = string.upper(v)
-                                note, oct = string.match(v, '^([CDEFGAB])([0-9])$')
-                                if not note then
-                                    note, oct = string.match(v, '^([CDEFGAB]#)([0-9])$')
+                                v = string.lower(v)
+                                -- Try Zargam syllables first
+                                for i, name in ipairs(zargamNotes) do
+                                    if name == v then
+                                        local tonic = 48
+                                        if currentScaleOffset then
+                                            tonic = 48 + (currentScaleOffset - 1)
+                                        end
+                                        return (i - 13) + tonic
+                                    end
                                 end
-                                if note and oct then
-                                    v = nil
+
+                                -- Try numeric Zargam labels (e.g. s4y, l3u)
+                                local cons, oct, suff = string.match(v, '^([a-z])([0-9])([uy])$')
+                                if cons and oct and suff then
+                                    local rel_oct = tonumber(oct)
+                                    local tonic = 48
+                                    if currentScaleOffset then
+                                        tonic = 48 + (currentScaleOffset - 1)
+                                    end
+                                    local interval
+                                    if suff == "u" then
+                                        local mirrored_consonants = {
+                                            s = 0, n = 1, v = 2, d = 3, t = 4, p = 5,
+                                            b = 6, m = 7, g = 8, k = 9, r = 10, l = 11
+                                        }
+                                        interval = mirrored_consonants[cons]
+                                        if interval then
+                                            return tonic + (rel_oct - 4) * 12 - interval
+                                        end
+                                    else
+                                        local regular_consonants = {
+                                            s = 0, l = 1, r = 2, k = 3, g = 4, m = 5,
+                                            b = 6, p = 7, t = 8, d = 9, v = 10, n = 11
+                                        }
+                                        interval = regular_consonants[cons]
+                                        if interval then
+                                            return tonic + (rel_oct - 4) * 12 + interval
+                                        end
+                                    end
+                                end
+
+                                -- Fallback to traditional parsing
+                                local note, oct_trad
+                                v = string.upper(v)
+                                note, oct_trad = string.match(v, '^([CDEFGAB])([0-9])$')
+                                if not note then
+                                    note, oct_trad = string.match(v, '^([CDEFGAB]#)([0-9])$')
+                                end
+                                if note and oct_trad then
+                                    local val = nil
                                     for i = 1, #notesTable do
                                         if notesTable[i] == note then
-                                            v = i - 1
+                                            val = i - 1
                                             break
                                         end
                                     end
-                                    if v then
-                                        v = v + (12 * tonumber(oct))
+                                    if val then
+                                        val = val + (12 * tonumber(oct_trad))
                                     else
-                                        v = 120
+                                        val = 120
                                     end
+                                    return tonumber(val)
                                 else
-                                    v = 120
+                                    return 120
                                 end
-                                return tonumber(v)
                             end
                         },
                     },
@@ -7931,7 +7977,7 @@ refreshSelectedNotes = function()
         rowIndex = noteValue2GridRowOffset(noteSelection[key].note, true)
         noteSelection[key].idx = tostring(noteSelection[key].step) ..
                 "_" .. tostring(rowIndex) .. "_" .. tostring(noteSelection[key].column)
-        noteString = lineValues[noteSelection[key].line]:note_column(noteSelection[key].column).note_string
+        noteString = getZargamLabel(noteSelection[key].note)
         newNotes_length = newNotes_length + 1
         newNotes[newNotes_length] = {
             noteSelection[key].column,
