@@ -164,9 +164,10 @@ local zargamNotes = {
 
 -- helper function to get zargam label for a note
 local getZargamLabel = function(note_value)
-    local tonic = 48 -- Default C-4
+    local base_note = 60 -- Default C-5
+    local tonic = base_note
     if currentScaleOffset then
-        tonic = 48 + (currentScaleOffset - 1)
+        tonic = base_note + (currentScaleOffset - 1)
     end
 
     local rel = note_value - tonic
