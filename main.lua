@@ -183,7 +183,7 @@ local getZargamLabel = function(note_value)
             [6] = "b", [7] = "m", [8] = "g", [9] = "k", [10] = "r", [11] = "l"
         }
         local note_in_mirrored_oct = rel % 12
-        return mirrored_consonants[note_in_mirrored_oct] .. tostring(rel_oct) .. "u"
+        return mirrored_consonants[note_in_mirrored_oct] .. "u" .. tostring(rel_oct)
     else
         -- Regular mapping for higher octaves
         local regular_consonants = {
@@ -191,8 +191,32 @@ local getZargamLabel = function(note_value)
             [6] = "b", [7] = "p", [8] = "t", [9] = "d", [10] = "v", [11] = "n"
         }
         local note_in_regular_oct = rel % 12
-        return regular_consonants[note_in_regular_oct] .. tostring(rel_oct) .. "y"
+        return regular_consonants[note_in_regular_oct] .. "y" .. tostring(rel_oct)
     end
+end
+
+-- returns the sample name mapped to the given note for an instrument, or nil if none
+function getSampleNameForNote(note_value, instrument_value)
+    if instrument_value == nil or instrument_value == 255 then
+        return nil
+    end
+    local ins = song.instruments[instrument_value + 1]
+    if ins == nil then
+        return nil
+    end
+    local mappings = ins.sample_mappings[renoise.Instrument.LAYER_NOTE_ON]
+    if mappings then
+        for _, mapping in ipairs(mappings) do
+            if note_value >= mapping.note_range[1] and note_value <= mapping.note_range[2] then
+                local name = mapping.sample.name
+                if name and #name > 0 then
+                    return name
+                end
+                return nil
+            end
+        end
+    end
+    return nil
 end
 
 -- helper function to check if a relative note index is a structural pillar (Za, Ma, Pa)
@@ -5380,7 +5404,7 @@ fillPianoRoll = function(quickRefresh)
                                     (preferences.keyLabels.value == 3 and
                                             noteInScale(yPLusOffMod12))
                             then
-                                key.text = getZargamLabel(y + noffset)
+                                key.text = getSampleNameForNote(y + noffset, currentInstrument) or getZargamLabel(y + noffset)
                                 if preferences.keyboardStyle.value == 2 then
                                     key.align = "left"
                                 else
@@ -5434,7 +5458,7 @@ fillPianoRoll = function(quickRefresh)
                         }
                     end
                     current_note = note
-                    current_note_string = getZargamLabel(current_note)
+                    current_note_string = getSampleNameForNote(current_note, instrument) or getZargamLabel(current_note)
                     current_note_len = 0
                     current_note_end_vel = nil
                     current_note_step = s
